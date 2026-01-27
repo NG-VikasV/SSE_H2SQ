@@ -1,8 +1,7 @@
 
 # SSE_H2SQ
-J0, J1, J2, Implemented as of now
+J0, J1, J2, Successfully Implemented and matcches with the ED/Classical result as of now.
 
-# IT_QMC
 
 This repository contains the setup and workflow for running Quantum Monte Carlo (QMC) simulations for the IT_QMC project. The simulations can be executed either directly from the terminal or through a Jupyter notebook interface.
 
@@ -31,7 +30,7 @@ Each subfolder inside `files/` corresponds to a unique parameter set and contain
 Use this method to manually compile and run simulations for a chosen parameter set.
 
 1. Navigate to a specific parameter folder, for example:  
-   `cd files/betaVp_100/fangleVp_0/L4/J2_0.00/J3_0.00/M1`
+   `cd "files\beta_10.00\L_8\J1_0.00_J2_0.00_J3_0.00"`
 
 2. Clean previous builds:  
    `make clean`
