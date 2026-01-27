@@ -3,7 +3,7 @@
 J0, J1, J2, Successfully Implemented and matcches with the ED/Classical result as of now.
 
 
-This repository contains the setup and workflow for running Quantum Monte Carlo (QMC) simulations for the IT_QMC project. The simulations can be executed either directly from the terminal or through a Jupyter notebook interface.
+This repository contains the setup and workflow for running SSE Quantum Monte Carlo (QMC) simulations for the H2SQ 3D project. The simulations can be executed either directly from the terminal or through a Jupyter notebook interface.
 
 ---
 
@@ -39,7 +39,7 @@ Use this method to manually compile and run simulations for a chosen parameter s
    `make`
 
 4. Run the executable:  
-   `./main.exe`
+   `./main.exe input_params.in`
 
 This option is useful when you want direct control over compilation and execution, especially for debugging or testing individual cases.
 
