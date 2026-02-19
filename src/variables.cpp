@@ -158,12 +158,12 @@ void Geometry::build(int Lx, int Ly, int Lz)
         int sA[4] = { pA.sites[0], pA.sites[1], pA.sites[2], pA.sites[3] };
         int sB[4] = { pB.sites[0], pB.sites[1], pB.sites[2], pB.sites[3] };
 
-        // Coefficients
-        // 0=BL, 1=TL, 2=TR, 3=BR
-        // Px: + + - -
+        // Coefficients corrected to match ED definition
+        // Px (Columnar/Vertical): (BL + TL) - (TR + BR) -> { +, +, -, - }
         double cx[4] = { 0.25, 0.25, -0.25, -0.25 };
-        // Py: + - - +
-        double cy[4] = { 0.25, -0.25, -0.25, 0.25 };
+        
+        // Py (Staggered/Diagonal): (BL + TR) - (TL + BR) -> { +, -, +, - }
+        double cy[4] = { 0.25, -0.25, 0.25, -0.25 };
 
         // Iterate all 16 pairs (i in A, j in B)
         for (int i = 0; i < 4; ++i) {

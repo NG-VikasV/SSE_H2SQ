@@ -17,7 +17,7 @@ SRCS := $(wildcard $(SDIR)/*.cpp)
 # ===============================
 OBJS := $(notdir $(SRCS:.cpp=.o))
 
-TARGET := main
+TARGET := sse_sim_test
 
 # ===============================
 # Default target

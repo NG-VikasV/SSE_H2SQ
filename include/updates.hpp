@@ -154,6 +154,9 @@ private:
 
     std::vector<int> linked_leg_to_op_index;
 
+    // Partner leg within the vertex (Space Link)
+    std::vector<int> vertex_partner;
+
     // Spin value on each leg
     std::vector<int> vertex_spin;
 

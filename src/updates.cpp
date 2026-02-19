@@ -212,7 +212,7 @@ void SSEUpdates::diagonal_update_h(SSEConfig& cfg,
             double prob = beta * prm.Ns * w / double(cfg.max_ops - cfg.n_ops);
 
             if (rng.uniform() < prob) {
-                op.type = OpType::OffDiagonal;
+                op.type = OpType::Diagonal;
                 op.subtype = OpSubtype::TransverseX_diag;
                 op.index = index;
                 cfg.n_ops++;
@@ -373,35 +373,43 @@ double SSEUpdates::diagonal_weight(int subtype,
         int prod = 1;
         for (int s : p.sites)
             prod *= cfg.spins.spin[s];          
-        return  std::abs(prod + 1) * prm.J0;
+        return  std::abs(prod + 1) * std::abs(prm.J0);
     }
 
     case OpSubtype::J1_Plaquette: {
         const auto& p = geom.blackPlaquettes[index];
-        int prod_sum = (cfg.spins.spin[p.sites[0]] * cfg.spins.spin[p.sites[2]] + 
-                        cfg.spins.spin[p.sites[1]] * cfg.spins.spin[p.sites[3]]);
-        return (prod_sum == -2 ? std::abs(prod_sum - 2) * prm.J1 : 0.0);
+        int s0 = cfg.spins.spin[p.sites[0]];
+        int s1 = cfg.spins.spin[p.sites[1]];
+        int s2 = cfg.spins.spin[p.sites[2]];
+        int s3 = cfg.spins.spin[p.sites[3]];
+        
+        // Correct ED match: Diagonal (0-2) and (1-3)
+        int prod_sum = s0*s2 + s1*s3;
+        
+        // Weight = C - H = 2|J| - J * prod_sum
+        return (prod_sum == 2.0 ? 4.0 * std::abs(prm.J1) : 0.0);
     }
     case OpSubtype::J2_Dipole: {
         const auto& bond = geom.j2bonds[index];
         int s1 = cfg.spins.spin[bond.s1];
         int s2 = cfg.spins.spin[bond.s2];
         
-        // Interaction: J_val * S1 * S2
-        // W = |J_val| - J_val * S1 * S2
-        return prm.J2 * (std::abs(bond.J_val) - bond.J_val * s1 * s2);
+        double J_local = bond.J_val * prm.J2;
+        // Standard SSE weight: C - H_bond = |J| - J * s1 * s2
+        // If AntiFerro (J>0): Antip(s1*s2=-1) -> J - (-J) = 2J. Parallel -> 0.
+        return std::abs(J_local) - J_local * s1 * s2;
     }
 
     case OpSubtype::J3_Inter: {
         const auto& bond = geom.j3bonds[index];
         int s1 = cfg.spins.spin[bond[0]];
         int s2 = cfg.spins.spin[bond[1]];
-        return std::abs(s1 * s2 - 1) * prm.J3;
+        
+        return (s1*s2 + 1 == 0 ? 2.0 * std::abs(prm.J3) : 0.0);
     }
 
     case OpSubtype::TransverseX_diag: {
-        int spin = cfg.spins.spin[index];
-        return std::abs(spin + 1) * prm.hx;        
+        return std::abs(prm.hx);        
     }
     default:
         return 0.0;
@@ -421,45 +429,132 @@ void SSEUpdates::directed_loop_update(SSEConfig& cfg,
                                       const Geometry& geom,
                                       RNG& rng)
 {
+    // Rename to Cluster Update logically, keeping function name for compatibility if needed.
+    // Ideally rename, but let's stick to the existing hook.
     build_vertex_list(cfg, geom, rng);
     check_integrity();
 
-    if (n_legs == 0) return;
-
-    // Reset cluster state/marks (using linked_leg as storage for visited status)
-    // Start loops
-    // Simplified target: volume target
-    int target_steps = std::max(prm.Ns, n_legs / 2);
-    int steps_done = 0;
-
-    while (steps_done < target_steps) {
-        int start_leg = int(rng.uniform() * n_legs);
-        int current_leg = start_leg;
-
-        do {
-            steps_done++;
-
-            // Entry into vertex (current_leg is an entry leg)
-            int p = linked_leg_to_op_index[current_leg];
-            
-            // Traversal: use deterministic exit if that was the 'starting phase'
-            // or just follow the vertex indices.
-            vertex_spin[current_leg] *= -1;
-            int exit_leg = choose_exit_leg(p, current_leg, 0, cfg, prm, geom, rng);
-            vertex_spin[exit_leg] *= -1;
-
-            // Follow time link
-            current_leg = linked_leg[exit_leg];
-
-            if (steps_done > 10000000) {
-                 std::cerr << "Safety break! Infinite loop or extremely large order.\n";
-                 return; // Avoid aborting, just return to keep progress if possible
-            }
-
-        } while (current_leg != start_leg);
+    if (n_legs == 0) {
+        // Handle trivial case: No operators. All sites are free spins?
+        // Yes. But let's check legs.
+        // If n_legs=0, we still might have free sites.
+        // Iterate all sites below.
     }
 
-    propagate_spins(cfg);
+    std::vector<int> cluster_id(n_legs, -1);
+    std::vector<bool> cluster_flipped; // Store if cluster ID k is flipped
+    int n_clusters = 0;
+    
+    // BFS Queue
+    std::vector<int> queue;
+    queue.reserve(n_legs);
+
+    // 1. Identify Clusters
+    for(int i=0; i<n_legs; ++i) {
+        if (cluster_id[i] == -1) {
+            int current_cid = n_clusters++;
+            bool do_flip = (rng.uniform() < 0.5);
+            cluster_flipped.push_back(do_flip);
+
+            // Start BFS
+            cluster_id[i] = current_cid;
+            queue.clear();
+            queue.push_back(i);
+
+            size_t head = 0;
+            while(head < queue.size()){
+                int u = queue[head++];
+                
+                // Neighbor 1: Linked Leg (Time)
+                int v1 = linked_leg[u];
+                if (v1 != -1 && cluster_id[v1] == -1) {
+                    cluster_id[v1] = current_cid;
+                    queue.push_back(v1);
+                }
+
+                // Neighbor 2: Vertex Partner (Space)
+                int v2 = vertex_partner[u];
+                if (v2 != -1 && cluster_id[v2] == -1) {
+                    cluster_id[v2] = current_cid;
+                    queue.push_back(v2);
+                }
+            }
+        }
+    }
+
+    // 2. Update Spin Configuration (t=0 boundary)
+    // Iterate all sites. If site has legs (first_leg != -1), check its cluster.
+    // If site has no legs, it's an independent cluster.
+    const int N = (int)cfg.spins.spin.size();
+    for(int s=0; s<N; ++s) {
+        if (first_leg[s] != -1) {
+            int leg = first_leg[s];
+            if (cluster_flipped[cluster_id[leg]]) {
+                cfg.spins.spin[s] *= -1;
+            }
+        } else {
+            // Free site cluster
+            if (rng.uniform() < 0.5) {
+                cfg.spins.spin[s] *= -1;
+            }
+        }
+    }
+
+    // 3. Update Operator Types (Transverse Field Boundary Checks)
+    // Iterate all operators, look for Transverse Field
+    // We need to find their legs.
+    // We can iterate vertex_op_index.
+    int leg_ptr = 0; // track legs linearly? No, build_vertex_list order is preserved.
+    // But leg_counter in build_vertex was linear.
+    // Better to use linked_leg_to_op_index implicitly?
+    // Let's iterate vertices again logic.
+    // Re-construct leg mapping is tedious.
+    // Easier: Iterate all legs?
+    // We know Transverse Field has 2 legs.
+    
+    // Loop over non-identity ops using vertex_op_index which matches build_vertex_list order
+    // We also know n_op_legs.
+    // We need to track the base leg index.
+    int current_base = 0;
+    for (int vp = 0; vp < (int)vertex_op_index.size(); ++vp) {
+        int p = vertex_op_index[vp];
+        auto& op = cfg.op_string[p];
+        
+        int n_this_op_legs = 0;
+        
+        if (op.subtype == OpSubtype::TransverseX_diag || 
+            op.subtype == OpSubtype::TransverseX_offdiag) {
+            n_this_op_legs = 2;
+            
+            // Check boundary flip
+            int l_in = current_base;
+            int l_out = current_base + 1;
+            
+            bool flip_in = cluster_flipped[cluster_id[l_in]];
+            bool flip_out = cluster_flipped[cluster_id[l_out]];
+            
+            if (flip_in != flip_out) {
+                // Toggle Type
+                if (op.subtype == OpSubtype::TransverseX_diag) {
+                    op.subtype = OpSubtype::TransverseX_offdiag;
+                    op.type = OpType::OffDiagonal;
+                } else {
+                    op.subtype = OpSubtype::TransverseX_diag;
+                    op.type = OpType::Diagonal;
+                }
+            }
+        } 
+        else if (op.subtype == OpSubtype::J0_Plaquette || op.subtype == OpSubtype::J1_Plaquette) {
+            n_this_op_legs = 8;
+        }
+        else if (op.subtype == OpSubtype::J2_Dipole || op.subtype == OpSubtype::J3_Inter) {
+            n_this_op_legs = 4;
+        }
+        
+        current_base += n_this_op_legs;
+    }
+
+    // Done. No propagate_spins needed (global update).
     check_spin_consistency(cfg, geom);
 }
 
@@ -479,6 +574,7 @@ void SSEUpdates::build_vertex_list(SSEConfig& cfg,
     leg_site.clear();   // <-- REQUIRED
     linked_leg_to_op_index.clear();
     base_vertex_leg.clear();
+    vertex_partner.clear();
 
 
     const int N = cfg.spins.spin.size();
@@ -517,7 +613,7 @@ void SSEUpdates::build_vertex_list(SSEConfig& cfg,
         if (op.subtype == OpSubtype::TransverseX_diag || 
             op.subtype == OpSubtype::TransverseX_offdiag) {
             sites.push_back(op.index);
-            n_op_legs = 2; // 2 legs per site * 1 site = 2
+            n_op_legs = 2;
         }
         else if (op.subtype == OpSubtype::J0_Plaquette) {
             const auto& plaq = geom.blackPlaquettes[op.index];
@@ -533,40 +629,12 @@ void SSEUpdates::build_vertex_list(SSEConfig& cfg,
         else if (op.subtype == OpSubtype::J1_Plaquette) {
             const auto& plaq = geom.blackPlaquettes[op.index];
             for(int s : plaq.sites) sites.push_back(s);
-            n_op_legs = 8; // 2 * 4
+            n_op_legs = 8; 
 
-            // J1 Decomposition: Sum of two terms
-            // Term A (type 0): sites (0,2) active, sites (1,3) identity
-            // Term B (type 1): sites (1,3) active, sites (0,2) identity
-            // Weight calculation based on spins BEFORE the vertex
-            // Note: sites order is BL, TL, TR, BR. (0,2) are diagonals?
-            // Plaquette sites: 0=BL, 1=TL, 2=TR, 3=BR
-            // J1 is diagonal pairs: (0,2) and (1,3) ?
-            // Let's re-verify diagonal_weight for J1.
-            // prod_sum = s0*s2 + s1*s3.
-            // Yes, pairs are (0,2) and (1,3).
-            
-            // Weight w0 = J1 * (s0*s2 + 1)
-            // Weight w1 = J1 * (s1*s3 + 1)
-            
-            double s0 = (double)spin[plaq.sites[0]];
-            double s2 = (double)spin[plaq.sites[2]];
-            double s1 = (double)spin[plaq.sites[1]];
-            double s3 = (double)spin[plaq.sites[3]];
-
-            double w0 = s0 * s2 + 1.0; 
-            double w1 = s1 * s3 + 1.0;
-            // Note: actual weight in diagonal_weight was (prod_sum + 2)*J1.
-            // w0+w1 = s0s2 + s1s3 + 2. Correct.
-            
-            double total_w = w0 + w1;
-            if (total_w <= 1e-10) {
-                 // Should ideally not happen if op exists, but finite precision/updates?
-                 // fallback
-                 decomp_type = (rng.uniform() < 0.5) ? 0 : 1;
-            } else {
-                 decomp_type = (rng.uniform() < (w0 / total_w)) ? 0 : 1;
-            }
+            // J1 Decomposition: None. (Deterministic Diagonal Pairs 0-2, 1-3)
+            // Just register sites.
+            // No random choice needed.
+            decomp_type = 1;
         }
         else if (op.subtype == OpSubtype::J2_Dipole) {
             const auto& bond = geom.j2bonds[op.index];
@@ -595,6 +663,7 @@ void SSEUpdates::build_vertex_list(SSEConfig& cfg,
             // Check size to avoid frequent reallocs?
             // Just resize
             linked_leg.resize(leg_counter, -1);
+            vertex_partner.resize(leg_counter, -1); // Separate spatial links
             vertex_spin.resize(leg_counter);
             leg_site.resize(leg_counter);
             linked_leg_to_op_index.resize(leg_counter);
@@ -609,7 +678,6 @@ void SSEUpdates::build_vertex_list(SSEConfig& cfg,
                 int out_leg = base + 1;
 
                 vertex_spin[in_leg]  = spin[site];
-                vertex_spin[out_leg] = spin[site]; 
                 
                 leg_site[in_leg]     = site;
                 leg_site[out_leg]    = site;
@@ -620,7 +688,7 @@ void SSEUpdates::build_vertex_list(SSEConfig& cfg,
                 base_vertex_leg[in_leg] = base;
                 base_vertex_leg[out_leg] = base;
 
-                // Time Linking
+                // Time Linking (Standard)
                 if (last_leg[site] != -1) {
                     linked_leg[last_leg[site]] = in_leg;
                     linked_leg[in_leg] = last_leg[site];
@@ -629,57 +697,142 @@ void SSEUpdates::build_vertex_list(SSEConfig& cfg,
                 }
                 last_leg[site] = out_leg;
 
-                // Propagate Spin
-                spin[site] *= -1;
-                // Update Out Spin
-                vertex_spin[out_leg] = spin[site];
+                // Vertex Linking (Cluster Construction)
+                // Transverse Field: Do NOT link In and Out. 
+                // This acts as a 'cut' in the cluster.
+                // If the cluster connected to In flips, and Out doesn't, we create a domain wall (Kink).
+
+                // Propagate Spin: Only Off-Diagonal (kinks) flip the worldline (removed)
+                // if (op.type == OpType::OffDiagonal) {
+                //     spin[site] *= -1;
+                // }
+                
+                // Assign Out Leg Spin (Must be the NEW state) (removed)
+                // vertex_spin[out_leg] = spin[site]; 
+                
+                // last_leg[site] = out_leg;
+                // vertex_spin[out_leg] = spin[site]; // Spin tracking removed
             }
             else {
-                // DIAGONAL OPERATORS (J0, J1, J2, J3)
-                // All sites connected, no spin flips across vertex
+                // J0, J1, J2, J3 (Diagonal Interactions)
+                // Link legs to force coupled flips.
+                // Iterate sites in pairs/groups based on bond structure.
+
+                // Iterate sites participating in the operator
+                for(size_t i=0; i<sites.size(); ++i) {
+                     int site = sites[i];
+                     int l_in = base + 2*i;
+                     int l_out = base + 2*i + 1;
+                     
+                     // vertex_spin[l_in] = spin[s]; // Spin tracking removed
+                     // vertex_spin[l_out] = spin[s]; // Spin tracking removed
+                     
+                     leg_site[l_in] = site;
+                     leg_site[l_out] = site;
+                     
+                     linked_leg_to_op_index[l_in] = p;
+                     linked_leg_to_op_index[l_out] = p;
+                     
+                     base_vertex_leg[l_in] = base;
+                     base_vertex_leg[l_out] = base;
+                     
+                     // Time Linking
+                     if (last_leg[site] != -1) {
+                         linked_leg[last_leg[site]] = l_in;
+                         linked_leg[l_in] = last_leg[site];
+                     } else {
+                         first_leg[site] = l_in;
+                     }
+                     last_leg[site] = l_out;
+                }
+
+                // Internal Vertex Linking (Horizontal)
+                // Connect Site A to Site B to ensure they flip together.
                 
-                int num_sites = (int)sites.size();
-                for(int i=0; i<num_sites; ++i) {
-                    int s = sites[i];
-                    int in = base + 2*i;
-                    int out = base + 2*i + 1; // Fixed index
+                if (op.subtype == OpSubtype::J0_Plaquette) {
+                    // J0: 3 Decompositions (0-1/2-3), (0-2/1-3), (0-3/1-2)
+                    int type = vertex_decomp[p]; // Randomized in build_vertex_list
                     
-                    vertex_spin[in] = spin[s];
-                    vertex_spin[out] = spin[s];
+                    int pair1_A = -1, pair1_B = -1;
+                    int pair2_A = -1, pair2_B = -1;
                     
-                    leg_site[in] = s;
-                    leg_site[out] = s;
-                    
-                    linked_leg_to_op_index[in] = p;
-                    linked_leg_to_op_index[out] = p;
-                    
-                    base_vertex_leg[in] = base;
-                    base_vertex_leg[out] = base;
-                    
-                    // Time Linking
-                    if (last_leg[s] != -1) {
-                        linked_leg[last_leg[s]] = in;
-                        linked_leg[in] = last_leg[s];
+                    if (type == 0) {
+                         // Pair (0,1) and (2,3)
+                         pair1_A = 0; pair1_B = 1;
+                         pair2_A = 2; pair2_B = 3;
+                    } else if (type == 1) {
+                         // Pair (0,2) and (1,3)
+                         pair1_A = 0; pair1_B = 2;
+                         pair2_A = 1; pair2_B = 3;
                     } else {
-                        first_leg[s] = in;
+                         // Pair (0,3) and (1,2)
+                         pair1_A = 0; pair1_B = 3;
+                         pair2_A = 1; pair2_B = 2;
                     }
-                    last_leg[s] = out;
+
+                    // Link First Pair
+                    {
+                        int l_in_A = base + 2*pair1_A;
+                        int l_in_B = base + 2*pair1_B;
+                        int l_out_A = base + 2*pair1_A + 1;
+                        int l_out_B = base + 2*pair1_B + 1;
+                        
+                        vertex_partner[l_in_A] = l_in_B; vertex_partner[l_in_B] = l_in_A;
+                        vertex_partner[l_out_A] = l_out_B; vertex_partner[l_out_B] = l_out_A;
+                    }
+                    
+                    // Link Second Pair
+                    {
+                        int l_in_A = base + 2*pair2_A;
+                        int l_in_B = base + 2*pair2_B;
+                        int l_out_A = base + 2*pair2_A + 1;
+                        int l_out_B = base + 2*pair2_B + 1;
+                        
+                        vertex_partner[l_in_A] = l_in_B; vertex_partner[l_in_B] = l_in_A;
+                        vertex_partner[l_out_A] = l_out_B; vertex_partner[l_out_B] = l_out_A;
+                    }
+                }
+                else if (op.subtype == OpSubtype::J1_Plaquette) {
+                    // J1: Sum of two bonds (0-2) and (1-3) [Diagonal] to match ED.
+                    {
+                        int k1=0, k2=2;
+                        int l_in_A = base + 2*k1; int l_in_B = base + 2*k2;
+                        int l_out_A = base + 2*k1 + 1; int l_out_B = base + 2*k2 + 1;
+                        
+                        vertex_partner[l_in_A] = l_in_B; vertex_partner[l_in_B] = l_in_A;
+                        vertex_partner[l_out_A] = l_out_B; vertex_partner[l_out_B] = l_out_A;
+                    }
+                    // Link (1,3)
+                    {
+                        int k1=1, k2=3;
+                        int l_in_A = base + 2*k1; int l_in_B = base + 2*k2;
+                        int l_out_A = base + 2*k1 + 1; int l_out_B = base + 2*k2 + 1;
+                        
+                        vertex_partner[l_in_A] = l_in_B; vertex_partner[l_in_B] = l_in_A;
+                        vertex_partner[l_out_A] = l_out_B; vertex_partner[l_out_B] = l_out_A;
+                    }
+                }
+                else {
+                    // J2/J3 (Dipole). 2 sites. Simple Pair.
+                    int l_in_A = base;
+                    int l_in_B = base + 2;
+                    int l_out_A = base + 1;
+                    int l_out_B = base + 3;
+                    
+                    vertex_partner[l_in_A] = l_in_B; vertex_partner[l_in_B] = l_in_A;
+                    vertex_partner[l_out_A] = l_out_B; vertex_partner[l_out_B] = l_out_A;
                 }
             }
         }
     }
 
-
-    // --------------------------------------------------
-    // Close imaginary-time boundaries
-    // --------------------------------------------------
+    // Close Periodic Boundary Conditions
     for (int s = 0; s < N; ++s) {
         if (first_leg[s] != -1) {
             linked_leg[last_leg[s]] = first_leg[s];
             linked_leg[first_leg[s]] = last_leg[s];
         }
     }
-
     n_legs = leg_counter;
 }
 
@@ -868,16 +1021,209 @@ int SSEUpdates::choose_exit_leg(int vertex,
                                 RNG& rng)
 {
     const auto& op = cfg.op_string[vertex];
-    int base = base_vertex_leg[entry_leg];
 
-    // Transverse Field Off-Diagonal: Always Transmit
-    if (op.subtype == OpSubtype::TransverseX_offdiag) {
-        return (entry_leg == base) ? base + 1 : base;
+    // Transverse Field (hx): 50/50 Probabilistic Transmit/Bounce
+    if (op.subtype == OpSubtype::TransverseX_diag || 
+        op.subtype == OpSubtype::TransverseX_offdiag) {
+        return (rng.uniform() < 0.5) ? (entry_leg ^ 1) : entry_leg;
     }
 
-    // Default: Deterministic same-site transmission
-    // Site index: (entry_leg - base) / 2
-    // If enter leg 2*site (bottom), exit at 2*site + 1 (top).
-    // This is simply entry_leg ^ 1 in the existing paired indexing.
-    return entry_leg ^ 1;
+    // Identify active legs
+    int base = base_vertex_leg[entry_leg];
+    int rel = entry_leg - base;
+    
+    int partner_site_idx = -1;
+    
+    // Logic from previous step to find partner
+    if (op.subtype == OpSubtype::J0_Plaquette) {
+        int type = vertex_decomp[vertex];
+        int site_idx = rel / 2;
+        if (type == 0) { 
+             if (site_idx == 0) partner_site_idx = 1;
+             else if (site_idx == 1) partner_site_idx = 0;
+             else if (site_idx == 2) partner_site_idx = 3;
+             else if (site_idx == 3) partner_site_idx = 2;
+        } else if (type == 1) { 
+             if (site_idx == 0) partner_site_idx = 2;
+             else if (site_idx == 2) partner_site_idx = 0;
+             else if (site_idx == 1) partner_site_idx = 3;
+             else if (site_idx == 3) partner_site_idx = 1;
+        } else { 
+             if (site_idx == 0) partner_site_idx = 3;
+             else if (site_idx == 3) partner_site_idx = 0;
+             else if (site_idx == 1) partner_site_idx = 2;
+             else if (site_idx == 2) partner_site_idx = 1;
+        }
+    }
+    else if (op.subtype == OpSubtype::J1_Plaquette) {
+        // No decomposition. Deterministic Diagonal Pairing.
+        // 0-2 and 1-3.
+        int site_idx = rel / 2;
+        int partner_site = -1;
+        
+        if (site_idx == 0) partner_site = 2;
+        else if (site_idx == 2) partner_site = 0;
+        else if (site_idx == 1) partner_site = 3;
+        else if (site_idx == 3) partner_site = 1;
+        
+        if (partner_site != -1) {
+             // In->Out check?
+             // target_rel = partner_site * 2 + (rel % 2 == 0 ? 1 : 0); // "Switch" logic
+             // Wait, previous code had manual target_rel calc.
+             // Let's use standard partners.
+             return base + partner_site * 2 + (rel % 2 == 0 ? 1 : 0);
+        }
+    }
+    else if (op.subtype == OpSubtype::J2_Dipole || op.subtype == OpSubtype::J3_Inter) {
+        int site_idx = rel / 2; 
+        partner_site_idx = (site_idx == 0) ? 1 : 0;
+    }
+
+    // If no partner (inactive leg), forced Vertical
+    if (partner_site_idx == -1) return entry_leg ^ 1;
+
+
+
+    // Assign canonical indices
+    // active_in/out vs partner_in/out
+    // Let's use 4 legs:
+    // 0: entry_leg's site IN
+    // 1: entry_leg's site OUT
+    // 2: partner's site IN
+    // 3: partner's site OUT
+    
+    // But we need to map actual legs.
+    int site_base = (rel / 2) * 2;
+    int p_base = partner_site_idx * 2;
+    
+    int l0 = base + site_base;     // Site A In
+    //int l1 = base + site_base + 1; // Site A Out (Unused)
+    int l2 = base + p_base;        // Site B In
+    int l3 = base + p_base + 1;    // Site B Out
+    
+    // Current spins on these legs
+    // CAUTION: vertex_spin[entry_leg] is ALREADY flipped by caller!
+    // We want to evaluate weights of potential OUTCOMES.
+    
+    // Candidate 1: Vertical (Exit = entry_leg ^ 1)
+    // We flip vertex_spin[entry_leg ^ 1].
+    // Result: A_in flipped, A_out flipped. B unchanged.
+    // State: (-Original_A, Original_B).
+    // Let's evaluate this using current vertex_spins.
+    // vertex_spin[l0] (if l0 is entry) is -sA. vertex_spin[l1] is sA.
+    // If we flip l1, we get -sA.
+    // So both A legs are -sA. B legs are sB.
+    // Valid "Diagonal" state with spins (-S_A, S_B).
+    
+    // Reconstruct for Horizontal choice
+    // Horizontal flips B_in (l2).
+    // A_in is -sA. B_in becomes -sB.
+    // A_out is sA. B_out is sB.
+    // State: In(-sA, -sB) -> Out(sA, sB).
+    // This is valid Off-Diagonal.
+    
+    // Evaluate weights
+    // S1, S2 for Vertical: -sA, sB.
+    int sA_v = vertex_spin[l0]; // Already flipped entry
+    int sB_v = vertex_spin[l2]; // Unchanged
+    // Actually, if entry was l0, sA_v is -Original_A.
+    // W_vert = Weight_Diag(sA_v, sB_v).
+    
+    // S1, S2 for Horizontal:
+    // Transition |-sA, -sB> to |sA, sB>.
+    // Weight is W_off.
+    
+    double w_vert = 0.0;
+    double w_horiz = 0.0;
+    
+    // Calculate J_val and Constant Shift C
+    double J_val = 0.0;
+    double C = 0.0;
+    
+    if (op.subtype == OpSubtype::J0_Plaquette) {
+        // J0 Spectators determine sign.
+        int s_idx1 = site_base/2;
+        int s_idx2 = p_base/2;
+        
+        int spec1 = -1, spec2 = -1;
+        for(int k=0; k<4; ++k) {
+             if (k!=s_idx1 && k!=s_idx2) {
+                 if (spec1==-1) spec1 = k;
+                 else spec2 = k;
+             }
+        }
+        
+        int l_spec1 = base + spec1*2;
+        int l_spec2 = base + spec2*2;
+        
+        int s_spec1 = vertex_spin[l_spec1];
+        int s_spec2 = vertex_spin[l_spec2];
+        
+        double spectator_sign = (double)(s_spec1 * s_spec2);
+        J_val = prm.J0 * spectator_sign; 
+        C = 2.0 * std::abs(prm.J0);
+    }
+    else if (op.subtype == OpSubtype::J1_Plaquette) {
+        J_val = prm.J1;
+        C = 2.0 * std::abs(prm.J1);
+    }
+    else if (op.subtype == OpSubtype::J2_Dipole) {
+        J_val = geom.j2bonds[op.index].J_val * prm.J2; 
+        C = 2.0 * std::abs(prm.J2);
+    }
+    else if (op.subtype == OpSubtype::J3_Inter) {
+        J_val = prm.J3;
+        C = 2.0 * std::abs(prm.J3);
+    }
+    
+    // Vertical (Diagonal) Weight
+    // W' = C - J_val * prod_v.
+    double prod_v = sA_v * sB_v;
+    w_vert = 0.0;
+
+    if (C > 0.0) {
+        w_vert = C - J_val * prod_v;
+    } else {
+        // Fallback (should not be reached if shifted)
+        double J_abs_local = std::abs(J_val);
+        w_vert = J_abs_local - J_val * prod_v; 
+    }
+    
+    if (w_vert < 1e-9) w_vert = 0.0;
+    
+    // Horizontal (Off-Diagonal) Weight
+    // J are Strictly Diagonal (Ising-like). 
+    // w_horiz = 0 implies we NEVER switch legs.
+    if (op.subtype == OpSubtype::J2_Dipole || op.subtype == OpSubtype::J3_Inter || 
+        op.subtype == OpSubtype::J1_Plaquette || op.subtype == OpSubtype::J0_Plaquette) {
+        w_horiz = 0.0;
+    } else {
+        // Default behavior for other operators (if any)
+        w_horiz = std::abs(J_val); 
+    }
+
+    // Determine candidate horizontal leg (even if weight is 0, define it)
+    int cand_horiz = -1;
+    // Simple partner logic: 0<->2 (In-In), 1<->3 (Out-Out)
+    // base legs: 0, 1 (Site A); 2, 3 (Site B).
+    // rel 0 -> 2. rel 1 -> 3. rel 2 -> 0. rel 3 -> 1.
+    // This assumes 4-leg vertex with 2 sites.
+    // For J1/J0 plaquette, we have 4 sites but decomposing into 2-site bonds.
+    // Site mapping was done at start of function (l0, l1, l2, l3).
+    // l0=entry, l1=entry^1.
+    // l2=partner_In, l3=partner_Out.
+    // If entry is Even (In), partner is l2 (In).
+    // If entry is Odd (Out), partner is l3 (Out).
+    if (rel % 2 == 0) cand_horiz = l2; 
+    else cand_horiz = l3;
+
+    // Compute probabilities
+    double total = w_vert + w_horiz;
+    if (total <= 1e-14) return entry_leg ^ 1; // Fallback
+    
+    if (rng.uniform() < (w_horiz / total)) {
+         return cand_horiz;
+    } else {
+         return entry_leg ^ 1;
+    }
 }

@@ -22,24 +22,27 @@ void Observables::accumulate(const SSEConfig& cfg,
     // Shift = Sum of constants added to diagonal weights
     // --------------------------------------------------
     double shift = 0.0;
-    // J0: C = J0 per plaquette
-    shift += double(geom.blackPlaquettes.size()) * prm.J0;
-    // J1: C = 2*J1 per plaquette
-    shift += double(geom.blackPlaquettes.size()) * 2.0 * prm.J1;
-    // J2: C = sum(C_bond) = sum(|J_eff|) + sum(identity_terms)
+
+    // J0 shift
+    shift += double(geom.blackPlaquettes.size()) * std::abs(prm.J0);
+
+    // J1 shift
+    shift += double(geom.blackPlaquettes.size()) * 2.0 * std::abs(prm.J1);
+
+    // J2 shift
     double C_J2 = 0.0;
     for(const auto& b : geom.j2bonds) {
         C_J2 += std::abs(b.J_val * prm.J2);
     }
     C_J2 += (geom.j2_constant_term * prm.J2);
-    
     shift += C_J2; 
-    
-    // J3: C = |J3| per bond
-    shift += double(geom.j3bonds.size()) * std::abs(prm.J3); 
 
-    // hx: C = hx per site
-    shift += double(prm.Ns) * prm.hx; 
+    // J3 shift
+    shift += double(geom.j3bonds.size()) * std::abs(prm.J3);
+
+
+    // hx shift
+    shift += double(prm.Ns) * std::abs(prm.hx); 
 
     double e = ((-double(cfg.n_ops) / prm.beta) + shift) / double(prm.Ns);
 
@@ -60,10 +63,14 @@ void Observables::accumulate(const SSEConfig& cfg,
         }
     }
 
-    double mx_inst = double(n_hx) / (prm.beta * prm.Ns);
-    //double e_trans_inst = - mx_inst;
+    double mx_inst = 0.0;
+    if (std::abs(prm.hx) > 1e-15) {
+        mx_inst = double(n_hx) / (prm.beta * prm.Ns * prm.hx);
+    }
+    double e_trans_inst = -prm.hx * mx_inst;
 
-    E_trans += mx_inst;
+    // Transverse energy column
+    E_trans += e_trans_inst;
 
     // --------------------------------------------------
     // Transverse magnetization

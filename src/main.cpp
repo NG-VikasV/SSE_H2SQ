@@ -55,13 +55,14 @@ int main(int argc, char* argv[])
     RNG rng;
     SSEUpdates updates;
 
-    // cfg.max_ops = static_cast<int>(2.0 * prm.beta * prm.Ns) + 100; 
-    // if (cfg.max_ops < 1000) cfg.max_ops = 1000; // safety floor
+    // Initial estimate for max_ops 
+    // <n> ~ beta * |E|. For J0=1, E ~ Ns. So <n> ~ beta * Ns.
+    // We add a safety buffer.
+    cfg.max_ops = static_cast<int>(2.0 * prm.beta * prm.Ns) + 1000;
     
-    // cfg.n_ops   = 0;
-    // cfg.op_string.resize(cfg.max_ops);
+    // Safety check
+    if (cfg.max_ops < 1000) cfg.max_ops = 1000;
 
-    cfg.max_ops = 10;
     cfg.n_ops   = 0;
     cfg.op_string.resize(cfg.max_ops);
 
@@ -111,7 +112,9 @@ int main(int argc, char* argv[])
     // );
 
     // Headers must match EXACT observable fields
+    // Headers must match EXACT observable fields
     std::vector<std::string> headers = {
+        "beta", "J0", "J1", "J2", "J3", "hx",
         "E", "E2", "E4",
         "E_trans",
         "mz", "mz2", "mz4",
@@ -122,6 +125,7 @@ int main(int argc, char* argv[])
     };
 
     std::vector<double> values = {
+        prm.beta, prm.J0, prm.J1, prm.J2, prm.J3, prm.hx,
         obs.E, obs.E2, obs.E4,
         obs.E_trans,
         obs.mz, obs.mz2, obs.mz4,
