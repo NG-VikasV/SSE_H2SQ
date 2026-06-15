@@ -365,7 +365,7 @@ const TerminalPanel = ({ lines, isLive }: { lines: string[]; isLive: boolean }) 
           const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
           setAutoScroll(scrollHeight - scrollTop - clientHeight < 24);
         }}
-        className="h-56 overflow-y-auto p-3 custom-scrollbar"
+        className="h-[calc(100vh-155px)] overflow-y-auto p-3 custom-scrollbar"
         style={{ fontFamily: "'Cascadia Code','Fira Code','Consolas','Courier New',monospace" }}
       >
         {lines.length === 0 ? (
@@ -900,6 +900,45 @@ export default function SimulationDashboard({ isServerReady = true }: { isServer
             )}
           </button>
 
+          {/* ── View toggle ── */}
+          <div className="mt-3 pt-3 border-t border-slate-800/40 flex items-center justify-center gap-3">
+            <button
+              onClick={() => setShowTerminal(false)}
+              className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors duration-150 ${!showTerminal ? 'text-white' : 'text-slate-500 hover:text-slate-400'}`}
+            >
+              <TableProperties className="w-3 h-3" />
+              Results
+            </button>
+            <button
+              onClick={() => setShowTerminal(t => !t)}
+              aria-label="Toggle terminal view"
+              className="relative w-11 h-[22px] rounded-full border border-slate-700/60 bg-slate-900 focus:outline-none"
+            >
+              <motion.div
+                animate={{ x: showTerminal ? 22 : 2 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 32 }}
+                className={`absolute top-[3px] w-4 h-4 rounded-full shadow-md transition-colors duration-200 ${
+                  showTerminal
+                    ? 'bg-gradient-to-tr from-emerald-500 to-cyan-400'
+                    : 'bg-gradient-to-tr from-indigo-500 to-purple-500'
+                }`}
+              />
+            </button>
+            <button
+              onClick={() => setShowTerminal(true)}
+              className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors duration-150 ${showTerminal ? 'text-white' : 'text-slate-500 hover:text-slate-400'}`}
+            >
+              <Terminal className="w-3 h-3" />
+              Terminal
+              {runningJobs.length > 0 && (
+                <span className="relative flex h-1.5 w-1.5 ml-0.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+                </span>
+              )}
+            </button>
+          </div>
+
           <AnimatePresence>
             {runningJobs.length > 0 && (
               <motion.div
@@ -1022,48 +1061,7 @@ export default function SimulationDashboard({ isServerReady = true }: { isServer
       </div>
 
       {/* ── Right: Analytics + Results ── */}
-      <div className="lg:col-span-8 space-y-4">
-
-        {/* ── View toggle ── */}
-        <div className="flex items-center justify-end gap-3">
-          <button
-            onClick={() => setShowTerminal(false)}
-            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors duration-150 ${!showTerminal ? 'text-white' : 'text-slate-500 hover:text-slate-400'}`}
-          >
-            <TableProperties className="w-3 h-3" />
-            Results
-          </button>
-
-          <button
-            onClick={() => setShowTerminal(t => !t)}
-            aria-label="Toggle terminal view"
-            className="relative w-11 h-[22px] rounded-full border border-slate-700/60 bg-slate-900 focus:outline-none"
-          >
-            <motion.div
-              animate={{ x: showTerminal ? 22 : 2 }}
-              transition={{ type: 'spring', stiffness: 500, damping: 32 }}
-              className={`absolute top-[3px] w-4 h-4 rounded-full shadow-md transition-colors duration-200 ${
-                showTerminal
-                  ? 'bg-gradient-to-tr from-emerald-500 to-cyan-400'
-                  : 'bg-gradient-to-tr from-indigo-500 to-purple-500'
-              }`}
-            />
-          </button>
-
-          <button
-            onClick={() => setShowTerminal(true)}
-            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors duration-150 ${showTerminal ? 'text-white' : 'text-slate-500 hover:text-slate-400'}`}
-          >
-            <Terminal className="w-3 h-3" />
-            Terminal
-            {runningJobs.length > 0 && (
-              <span className="relative flex h-1.5 w-1.5 ml-0.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
-              </span>
-            )}
-          </button>
-        </div>
+      <div className="lg:col-span-8">
 
         {!showTerminal ? (<>
         {/* Results Table */}

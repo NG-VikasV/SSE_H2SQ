@@ -48,26 +48,26 @@ static const char* const PW    = "[DBG-WARN] ";
 
 // ── Tiny helpers ──────────────────────────────────────────────────────────────
 static inline std::string spin_icon(int s) {
-    if (s > 0) return std::string(AGN) + "↑" + A0;
-    if (s < 0) return std::string(ARD) + "↓" + A0;
+    if (s > 0) return std::string(AGN) + "UP" + A0;
+    if (s < 0) return std::string(ARD) + "DN" + A0;
     return std::string(AYL) + "?" + A0;   // 0 = not set
 }
 
 static inline std::string ok_fail(bool b) {
-    return b ? (std::string(AGN) + ABLD + "✓" + A0)
-             : (std::string(ARD) + ABLD + "✗" + A0);
+    return b ? (std::string(AGN) + ABLD + "OK" + A0)
+             : (std::string(ARD) + ABLD + "NO" + A0);
 }
 
 static inline void section_hdr(const char* pfx, const char* bg, const char* title) {
     std::string t = title;
     int pad = std::max(0, 62 - (int)t.size());
-    std::cout << pfx << ABLD << bg << AW << "  \xe2\x94\x80\xe2\x94\x80 " << t << " ";
-    for (int k = 0; k < pad; ++k) std::cout << "\xe2\x94\x80"; // ─ (U+2500)
+    std::cout << pfx << ABLD << bg << AW << "  -- " << t << " ";
+    for (int k = 0; k < pad; ++k) std::cout << "-";
     std::cout << A0 << "\n";
 }
 static inline void section_ftr(const char* pfx, const char* bg) {
     std::cout << pfx << ABLD << bg << AW << "  ";
-    for (int k = 0; k < 68; ++k) std::cout << "\xe2\x94\x80";
+    for (int k = 0; k < 68; ++k) std::cout << "-";
     std::cout << A0 << "\n" << std::flush;
 }
 
@@ -114,8 +114,8 @@ inline void dbg_check_init(const SSEConfig&   cfg,
     bool spins_ok = (n_bad == 0 && (int)cfg.spins.spin.size() == prm.Ns);
     std::cout << PI << "  Spins     "
               << AW << cfg.spins.spin.size() << A0 << " total  "
-              << AGN << "↑" << A0 << n_up << "  "
-              << ARD << "↓" << A0 << n_dn;
+              << AGN << "(+)" << A0 << n_up << "  "
+              << ARD << "(-)" << A0 << n_dn;
     if (n_bad) std::cout << "  " << ARD << ABLD << "BAD=" << n_bad << A0;
     std::cout << "  (expected Ns=" << prm.Ns << ")  " << ok_fail(spins_ok) << "\n";
     std::cout << PI << "  Spin vals: ";
@@ -134,7 +134,7 @@ inline void dbg_check_init(const SSEConfig&   cfg,
               << "n_ops=" << cfg.n_ops << "  max_ops=" << cfg.max_ops
               << "  all_ID=" << ok_fail(all_id);
     if (subtype_warn)
-        std::cout << "  " << AYL << "⚠ default subtype=J0_Plaquette (should be None)" << A0;
+        std::cout << "  " << AYL << "(!) default subtype=J0_Plaquette (should be None)" << A0;
     std::cout << "\n";
 
     // ── parameters ────────────────────────────────────────────────────────────
@@ -150,14 +150,14 @@ inline void dbg_check_init(const SSEConfig&   cfg,
     bool ns_ok = (prm.Ns == prm.Lx * prm.Ly * prm.Lz);
     if (!ns_ok)
         std::cout << PW << "  " << ARD << "Ns=" << prm.Ns
-                  << " ≠ Lx*Ly*Lz=" << (prm.Lx*prm.Ly*prm.Lz) << A0 << "\n";
+                  << " != Lx*Ly*Lz=" << (prm.Lx*prm.Ly*prm.Lz) << A0 << "\n";
     std::cout << PI << "  Params    "
               << "J0=" << AYL << prm.J0 << A0
               << " J1=" << AYL << prm.J1 << A0
               << " J2=" << AYL << prm.J2 << A0
               << " J3=" << AYL << prm.J3 << A0
               << " hx=" << AYL << prm.hx << A0
-              << " β="  << ACY << prm.beta << A0
+              << " beta="  << ACY << prm.beta << A0
               << " Ns=" << prm.Ns << " Np=" << prm.Np
               << "  " << ok_fail(prm_ok && ns_ok) << "\n";
 
@@ -172,7 +172,7 @@ inline void dbg_check_init(const SSEConfig&   cfg,
     // ── known issues ──────────────────────────────────────────────────────────
     std::cout << PW << "  " << AYL
               << "vertex_spin was NOT set for J0/J1/J2/J3 legs in original build_vertex_list"
-              << A0 << " — " << AGN << "FIXED in debug build" << A0 << "\n";
+              << A0 << " - " << AGN << "FIXED in debug build" << A0 << "\n";
     std::cout << PW << "  " << AGY
               << "choose_exit_leg() is never called from directed_loop_update() "
               << "— current update is Wolff BFS cluster (not true directed loop)"
@@ -205,7 +205,7 @@ inline void dbg_print_op_string(const SSEConfig&  cfg,
 
         if (id_run > 0) {
             std::cout << PO << "  " << AGY << ADIM
-                      << "  ··· " << id_run << " Identity slot"
+                      << "  ... " << id_run << " Identity slot"
                       << (id_run > 1 ? "s" : "") << " ···" << A0 << "\n";
             id_run = 0;
         }
@@ -226,7 +226,7 @@ inline void dbg_print_op_string(const SSEConfig&  cfg,
                 double w = std::abs(prod + 1) * std::abs(prm.J0);
                 std::cout << "  sites=[" << pl.sites[0] << "," << pl.sites[1]
                           << "," << pl.sites[2] << "," << pl.sites[3] << "]"
-                          << "  σprod=" << (prod > 0 ? std::string(AGN)+"+1"+A0 : std::string(ARD)+"-1"+A0)
+                          << "  sprod=" << (prod > 0 ? std::string(AGN)+"+1"+A0 : std::string(ARD)+"-1"+A0)
                           << "  " << ACY << "w=" << w << A0;
 
             } else if (op.subtype == OpSubtype::J1_Plaquette
@@ -261,7 +261,7 @@ inline void dbg_print_op_string(const SSEConfig&  cfg,
 
             } else if (op.subtype == OpSubtype::TransverseX_diag && op.index >= 0) {
                 std::cout << "  site=" << op.index
-                          << "  σ=" << spin_icon(cfg.spins.spin[op.index])
+                          << "  s=" << spin_icon(cfg.spins.spin[op.index])
                           << "  " << ACY << "w=" << std::abs(prm.hx) << A0;
             }
         } else { // OffDiagonal
@@ -271,7 +271,7 @@ inline void dbg_print_op_string(const SSEConfig&  cfg,
                       << " idx=" << std::setw(3) << op.index << "]" << A0;
             if (op.index >= 0 && op.index < (int)cfg.spins.spin.size())
                 std::cout << "  site=" << op.index
-                          << "  σ_in=" << spin_icon(cfg.spins.spin[op.index])
+                          << "  s_in=" << spin_icon(cfg.spins.spin[op.index])
                           << "  " << AMG << "(spin flips here)" << A0;
         }
         std::cout << "\n";
@@ -323,7 +323,7 @@ inline void dbg_print_vertex_list(
             std::cout << PL << "    site " << std::setw(3) << s
                       << ": first=leg" << std::setw(4) << first_leg[s]
                       << "  last=leg" << std::setw(4)  << last_leg[s]
-                      << "  " << ABL << "(last↔first periodic)" << A0 << "\n";
+                      << "  " << ABL << "(last<->first periodic)" << A0 << "\n";
         }
     }
     std::cout << PL << "\n";
@@ -363,8 +363,8 @@ inline void dbg_print_vertex_list(
             std::cout << PL << "    leg" << std::setw(4) << leg
                       << (is_in ? " [in ] " : " [out] ")
                       << " site=" << std::setw(3) << site
-                      << "  σ=" << spin_icon(sv)
-                      << "  ←τ→ " << ABL << "leg" << std::setw(4) << linked << A0;
+                      << "  s=" << spin_icon(sv)
+                      << "  <t> " << ABL << "leg" << std::setw(4) << linked << A0;
             if (partner >= 0)
                 std::cout << "  partner→ " << AOR << "leg" << std::setw(4) << partner << A0;
             std::cout << "\n";
@@ -397,7 +397,7 @@ static inline void dbg_loop_cluster_start(int cid, int start_leg, double r, bool
               << "  start=leg" << std::setw(4) << start_leg
               << " (site " << site << ")"
               << "  r=" << ACY << std::fixed << std::setprecision(4) << r << A0
-              << "  →  " << (flip
+              << "  --> " << (flip
                   ? (std::string(ABLD) + AGN + "FLIP" + A0)
                   : (std::string(AGY)  + "KEEP" + A0))
               << "\n";
@@ -410,7 +410,7 @@ static inline void dbg_loop_bfs_expand(int from_leg, int to_leg,
     int ts = (to_leg   < (int)leg_site.size()) ? leg_site[to_leg]   : -1;
     std::cout << PB << "    " << AGY
               << "leg" << std::setw(4) << from_leg << "(s" << fs << ")"
-              << " --" << via << "→ "
+              << " --" << via << "> "
               << "leg" << std::setw(4) << to_leg   << "(s" << ts << ")"
               << A0 << "\n";
 }
@@ -425,27 +425,27 @@ static inline void dbg_loop_cluster_end(int cid, int n_members) {
 static inline void dbg_loop_spin_section() {
     std::cout << PB << "\n"
               << PB << "  " << ABLD << AW
-              << "── t=0 boundary spin updates ──" << A0 << "\n";
+              << "-- t=0 boundary spin updates --" << A0 << "\n";
 }
 
 static inline void dbg_loop_spin_update(int site, int old_spin, int new_spin) {
     if (old_spin == new_spin) return;  // unchanged — silent
     std::cout << PB << "    site " << std::setw(3) << site << ": "
-              << spin_icon(old_spin) << " → " << spin_icon(new_spin)
+              << spin_icon(old_spin) << " -> " << spin_icon(new_spin)
               << "  " << AGN << ABLD << "flipped" << A0 << "\n";
 }
 
 static inline void dbg_loop_toggle_section() {
     std::cout << PB << "\n"
               << PB << "  " << ABLD << AW
-              << "── TransverseX operator toggles ──" << A0 << "\n";
+              << "-- TransverseX operator toggles --" << A0 << "\n";
 }
 
 static inline void dbg_loop_op_toggle(int p, int site,
                                       const char* from_s, const char* to_s) {
     std::cout << PB << "    op[" << std::setw(3) << p << "]"
               << " site=" << site
-              << "  " << AOR << from_s << A0 << " → " << AMG << to_s << A0
+              << "  " << AOR << from_s << A0 << " -> " << AMG << to_s << A0
               << "  " << AMG << "(cluster-boundary crossing)" << A0 << "\n";
 }
 
