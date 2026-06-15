@@ -29,25 +29,23 @@ function Header({ page, setPage, isServerReady }: { page: Page; setPage: (p: Pag
           <nav className="bg-slate-950/80 p-0.5 border border-slate-800/80 rounded-lg flex">
             <button
               onClick={() => setPage('simulation')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold rounded-md transition-all duration-200 ${
-                page === 'simulation'
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold rounded-md transition-all duration-200 ${page === 'simulation'
                   ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
                   : 'text-slate-500 hover:text-slate-300 border border-transparent'
-              }`}
+                }`}
             >
               <FlaskConical className="w-3 h-3" />
               Simulation
             </button>
             <button
               onClick={() => setPage('plots')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold rounded-md transition-all duration-200 ${
-                page === 'plots'
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold rounded-md transition-all duration-200 ${page === 'plots'
                   ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                   : 'text-slate-500 hover:text-slate-300 border border-transparent'
-              }`}
+                }`}
             >
               <BarChart2 className="w-3 h-3" />
-              Physics Plots
+              Publication Plots
             </button>
           </nav>
 
@@ -81,10 +79,10 @@ function App() {
         setIsServerReady(false);
       }
     };
-    
+
     // Initial check
     checkHealth();
-    
+
     // Poll every 5 seconds
     const interval = setInterval(checkHealth, 5000);
     return () => clearInterval(interval);

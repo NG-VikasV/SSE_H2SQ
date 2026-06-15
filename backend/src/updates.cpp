@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <iterator>
 
 // ======================================================
 // Top-level sweep

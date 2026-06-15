@@ -403,6 +403,16 @@ n_measure {params.n_measure}
                         line = proc.stdout.readline()
                         if not line:
                             break
+                        # Stream every raw stdout line to the terminal viewer in the UI
+                        stripped_line = line.rstrip('\n').rstrip('\r')
+                        if stripped_line and client_id and client_id in active_connections:
+                            asyncio.run_coroutine_threadsafe(
+                                active_connections[client_id].send_text(json.dumps({
+                                    "type": "stdout",
+                                    "line": stripped_line,
+                                })),
+                                loop
+                            )
                         if line.startswith("[PROGRESS]"):
                             try:
                                 # [PROGRESS] therm 250000 500000 12.50

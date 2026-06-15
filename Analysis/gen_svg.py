@@ -19,10 +19,10 @@ for y in range(Ly):
 
 BG          = "#ffffff"
 CELL_FILL   = "#1a1a2e"   # dark navy — strong contrast against white bg
-HATCH_COL   = "#6868c0"   # medium blue-purple — visible against dark cell fill
+HATCH_COL   = "#ffffff"   # pure white — maximum contrast against dark cell fill
 BORDER_COL  = "#3a3a90"   # blue border
 LABEL_COL   = "#ffffff"   # white labels on dark cell
-BOND_COL    = "#555555"   # dark gray bonds on white bg
+BOND_COL    = "#222222"   # near-black bonds, thick, clearly visible on white bg
 NODE_FILL   = "#1a50a0"   # blue nodes
 NODE_GHOST  = "#aaaaaa"   # gray ghost nodes
 
@@ -51,7 +51,7 @@ for (ci, cj), p in plaq.items():
     x0, y0 = sx(ci), sy(cj)
     cx, cy = x0 + cell // 2, y0 + cell // 2
     out.append(f'  <rect x="{x0}" y="{y0}" width="{cell}" height="{cell}" fill="{CELL_FILL}"/>')
-    crosshatch(out, x0, y0, cell, 12, HATCH_COL, 2.0)
+    crosshatch(out, x0, y0, cell, 12, HATCH_COL, 2.5)
     out.append(f'  <rect x="{x0}" y="{y0}" width="{cell}" height="{cell}" fill="none" stroke="{BORDER_COL}" stroke-width="2"/>')
     out.append(f'  <text x="{cx}" y="{cy+1}" text-anchor="middle" dominant-baseline="middle" '
                f'fill="{LABEL_COL}" font-size="13" font-family="monospace" font-weight="bold">P{p}</text>')
@@ -59,10 +59,10 @@ for (ci, cj), p in plaq.items():
 # Bonds (drawn after hatch so they're on top)
 for nj in range(Ly + 1):
     for ni in range(Lx):
-        out.append(f'  <line x1="{sx(ni)}" y1="{sy(nj)}" x2="{sx(ni+1)}" y2="{sy(nj)}" stroke="{BOND_COL}" stroke-width="1.5"/>')
+        out.append(f'  <line x1="{sx(ni)}" y1="{sy(nj)}" x2="{sx(ni+1)}" y2="{sy(nj)}" stroke="{BOND_COL}" stroke-width="2.5"/>')
 for ni in range(Lx + 1):
     for nj in range(Ly):
-        out.append(f'  <line x1="{sx(ni)}" y1="{sy(nj)}" x2="{sx(ni)}" y2="{sy(nj+1)}" stroke="{BOND_COL}" stroke-width="1.5"/>')
+        out.append(f'  <line x1="{sx(ni)}" y1="{sy(nj)}" x2="{sx(ni)}" y2="{sy(nj+1)}" stroke="{BOND_COL}" stroke-width="2.5"/>')
 
 # Site nodes
 for ni in range(Lx + 1):

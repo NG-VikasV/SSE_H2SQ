@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Play, Square, Sparkles, TableProperties, Grid3x3 } from 'lucide-react';
+import { Play, Square, Sparkles, TableProperties, Grid3x3, Terminal } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const hostname = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1';
@@ -37,54 +37,106 @@ const InputField = ({
 );
 
 const SpinSVG = ({ spins, step, Lx, Ly, Lz = 1, cellSize, pad }: { spins: number[]; step: number; Lx: number; Ly: number; Lz?: number; cellSize: number; pad: number }) => {
-  const bonds = [] as React.ReactElement[];
-  const circles = [] as React.ReactElement[];
-  
-  // Calculate Lz automatically if not provided, assuming Lx*Ly*Lz = spins.length
+  const plaquettes = [] as React.ReactElement[];
+  const bonds      = [] as React.ReactElement[];
+  const circles    = [] as React.ReactElement[];
+
   const actualLz = Lz > 1 ? Lz : Math.max(1, Math.floor(spins.length / (Lx * Ly)));
-  
+
   const layerSpacing = Lx * cellSize + pad * 2;
   const svgW = actualLz * layerSpacing;
   const svgH = Ly * cellSize + 2 * pad;
   const r = cellSize * 0.38;
 
+  // Plaquette index map: same enumeration as C++ blackPlaquettes
+  // for y in 0..Ly-1, for x in 0..Lx-1, if (x+y)%2==0 → push
+  const pidMap = new Map<string, number>();
+  { let pid = 0;
+    for (let y = 0; y < Ly; y++)
+      for (let x = 0; x < Lx; x++)
+        if ((x + y) % 2 === 0)
+          pidMap.set(`${x},${y}`, pid++);
+  }
+
   for (let z = 0; z < actualLz; z++) {
     const xOffset = z * layerSpacing;
-    
-    // Draw intralayer bonds
+
+    // Black plaquettes: fill + X mark + index label.
+    // The SVG is sized so that plaquettes at x=Lx-1 and y=Ly-1 (periodic
+    // boundary) also fit exactly at the edge — no clipping needed.
+    for (let y = 0; y < Ly; y++) {
+      for (let x = 0; x < Lx; x++) {
+        if ((x + y) % 2 !== 0) continue;
+        const pid = pidMap.get(`${x},${y}`) ?? -1;
+        const px  = xOffset + pad + x * cellSize + cellSize / 2;
+        const py  = pad + y * cellSize + cellSize / 2;
+        const xcx = px + cellSize / 2;
+        const ycy = py + cellSize / 2;
+        const xp  = cellSize * 0.18;          // padding from corner for X arms
+
+        plaquettes.push(
+          <rect key={`plaq-${z}-${x}-${y}`}
+            x={px} y={py} width={cellSize} height={cellSize}
+            fill="rgba(80,80,200,0.20)" rx={2} />
+        );
+        {/* X mark — two diagonal lines, white semi-transparent */}
+        plaquettes.push(
+          <line key={`xa-${z}-${x}-${y}`}
+            x1={px+xp} y1={py+xp} x2={px+cellSize-xp} y2={py+cellSize-xp}
+            stroke="rgba(255,255,255,0.60)" strokeWidth={1.5} strokeLinecap="round" />
+        );
+        plaquettes.push(
+          <line key={`xb-${z}-${x}-${y}`}
+            x1={px+cellSize-xp} y1={py+xp} x2={px+xp} y2={py+cellSize-xp}
+            stroke="rgba(255,255,255,0.60)" strokeWidth={1.5} strokeLinecap="round" />
+        );
+        {/* Plaquette index label */}
+        {pid >= 0 && cellSize >= 18 && plaquettes.push(
+          <text key={`plabel-${z}-${x}-${y}`}
+            x={xcx} y={ycy}
+            textAnchor="middle" dominantBaseline="middle"
+            fontSize={Math.max(6, Math.floor(cellSize * 0.28))}
+            fill="rgba(200,210,255,0.90)" fontFamily="monospace" fontWeight="bold"
+            style={{ pointerEvents: 'none', userSelect: 'none' as const }}>
+            P{pid}
+          </text>
+        )}
+      }
+    }
+
+    // Bonds — white/light so they're visible on the dark background
     for (let y = 0; y < Ly; y++) {
       for (let x = 0; x < Lx; x++) {
         const cx = xOffset + pad + x * cellSize + cellSize / 2;
         const cy = pad + y * cellSize + cellSize / 2;
         if (x < Lx - 1) {
           const nx = xOffset + pad + (x + 1) * cellSize + cellSize / 2;
-          bonds.push(<line key={`h-${z}-${x}-${y}`} x1={cx} y1={cy} x2={nx} y2={cy} stroke="#334155" strokeWidth={1.5} />);
+          bonds.push(<line key={`h-${z}-${x}-${y}`} x1={cx} y1={cy} x2={nx} y2={cy} stroke="#cbd5e1" strokeWidth={2} />);
         }
         if (y < Ly - 1) {
           const ny = pad + (y + 1) * cellSize + cellSize / 2;
-          bonds.push(<line key={`v-${z}-${x}-${y}`} x1={cx} y1={cy} x2={cx} y2={ny} stroke="#334155" strokeWidth={1.5} />);
+          bonds.push(<line key={`v-${z}-${x}-${y}`} x1={cx} y1={cy} x2={cx} y2={ny} stroke="#cbd5e1" strokeWidth={2} />);
         }
       }
     }
-    
-    // Draw interlayer bonds (dotted lines to the previous layer)
+
+    // Interlayer bonds
     if (z > 0) {
       for (let y = 0; y < Ly; y++) {
         for (let x = 0; x < Lx; x++) {
           const cx = xOffset + pad + x * cellSize + cellSize / 2;
           const cy = pad + y * cellSize + cellSize / 2;
           const prevCx = (z - 1) * layerSpacing + pad + x * cellSize + cellSize / 2;
-          bonds.push(<line key={`il-${z}-${x}-${y}`} x1={prevCx} y1={cy} x2={cx} y2={cy} stroke="#334155" strokeWidth={1} strokeDasharray="4,4" opacity={0.5} />);
+          bonds.push(<line key={`il-${z}-${x}-${y}`} x1={prevCx} y1={cy} x2={cx} y2={cy} stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4,4" opacity={0.7} />);
         }
       }
     }
 
-    // Draw spins
+    // Spins
     for (let y = 0; y < Ly; y++) {
       for (let x = 0; x < Lx; x++) {
         const site = z * (Lx * Ly) + y * Lx + x;
         if (site >= spins.length) continue;
-        
         const cx = xOffset + pad + x * cellSize + cellSize / 2;
         const cy = pad + y * cellSize + cellSize / 2;
         const isUp = spins[site] > 0;
@@ -108,6 +160,7 @@ const SpinSVG = ({ spins, step, Lx, Ly, Lz = 1, cellSize, pad }: { spins: number
         {actualLz > 1 && <span className="text-slate-600">({actualLz} Layers)</span>}
       </div>
       <svg width={svgW} height={svgH} className="rounded-lg bg-slate-950/60 border border-slate-800/40">
+        {plaquettes}
         {bonds}
         {circles}
       </svg>
@@ -213,6 +266,118 @@ const AlgorithmChecksPanel = ({ summary }: { summary: Record<string, any> }) => 
           One or more SSE algorithm checks failed — results may be unreliable.
         </p>
       )}
+    </div>
+  );
+};
+
+// ─── Terminal line colour coding ─────────────────────────────────────────────
+const termLineClass = (line: string): string => {
+  if (!line.trim()) return 'text-transparent select-none';
+  if (line.startsWith('[PROGRESS]'))         return 'text-slate-600';
+  if (line.includes('[SSE-CHECK] PASS'))     return 'text-emerald-400';
+  if (line.includes('[SSE-CHECK] FAIL'))     return 'text-red-400';
+  if (line.startsWith('[SSE-CHECKS-SUMMARY]')) return 'text-cyan-300';
+  if (line.startsWith('['))                  return 'text-amber-300';
+  if (line.startsWith('#'))                  return 'text-slate-500';
+  return 'text-slate-300';
+};
+
+const TerminalPanel = ({ lines, isLive }: { lines: string[]; isLive: boolean }) => {
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = React.useState(true);
+
+  React.useEffect(() => {
+    if (autoScroll && scrollRef.current)
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [lines, autoScroll]);
+
+  return (
+    <div className="bg-[#06060a] border border-slate-800/60 rounded-2xl overflow-hidden shadow-2xl relative">
+      {/* top accent */}
+      <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-emerald-500/25 to-transparent" />
+
+      {/* title bar */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800/50 bg-slate-950/60">
+        <div className="flex items-center gap-3">
+          {/* macOS traffic lights */}
+          <div className="flex gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-red-500/60" />
+            <div className="w-2.5 h-2.5 rounded-full bg-amber-500/60" />
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/60" />
+          </div>
+          <Terminal className="w-3 h-3 text-slate-500" />
+          <span className="text-[10px] font-bold text-slate-400 tracking-widest uppercase font-mono">
+            sse_sim_test — stdout
+          </span>
+          {isLive && (
+            <span className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-400">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+              </span>
+              LIVE
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] text-slate-600 font-mono">{lines.length} lines</span>
+          <button
+            onClick={() => setAutoScroll(a => !a)}
+            title="Toggle auto-scroll"
+            className={`text-[8px] font-bold px-1.5 py-0.5 rounded border transition-colors ${
+              autoScroll
+                ? 'text-emerald-400 border-emerald-500/30 bg-emerald-950/30'
+                : 'text-slate-600 border-slate-700/30 bg-slate-900/30 hover:text-slate-300'
+            }`}
+          >
+            AUTO↓
+          </button>
+          {lines.length > 0 && (
+            <button
+              onClick={() => navigator.clipboard?.writeText(lines.join('\n'))}
+              title="Copy all output"
+              className="text-[8px] font-bold px-1.5 py-0.5 rounded border text-slate-500 border-slate-700/30 bg-slate-900/30 hover:text-slate-300 transition-colors"
+            >
+              COPY
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* body */}
+      <div
+        ref={scrollRef}
+        onScroll={() => {
+          if (!scrollRef.current) return;
+          const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+          setAutoScroll(scrollHeight - scrollTop - clientHeight < 24);
+        }}
+        className="h-56 overflow-y-auto p-3 custom-scrollbar"
+        style={{ fontFamily: "'Cascadia Code','Fira Code','Consolas','Courier New',monospace" }}
+      >
+        {lines.length === 0 ? (
+          <div className="flex items-center gap-2 justify-center h-full text-slate-700 text-[11px] font-mono">
+            <span>Waiting for output</span>
+            <span className="animate-pulse text-emerald-700">▊</span>
+          </div>
+        ) : (
+          lines.map((line, i) => (
+            <div key={i} className={`flex items-baseline text-[10px] leading-[1.65] ${termLineClass(line)}`}>
+              <span className="text-slate-800 mr-3 select-none tabular-nums w-7 text-right flex-shrink-0 font-mono">
+                {i + 1}
+              </span>
+              <span className="break-all whitespace-pre-wrap">{line || ' '}</span>
+            </div>
+          ))
+        )}
+        {isLive && (
+          <div className="flex items-baseline text-[10px] leading-[1.65] text-emerald-600 mt-0.5">
+            <span className="text-slate-800 mr-3 select-none w-7 text-right flex-shrink-0 font-mono">$</span>
+            <span className="animate-pulse">▊</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -331,6 +496,10 @@ export default function SimulationDashboard({ isServerReady = true }: { isServer
   const [results, setResults] = useState<any[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
+  // ─── Terminal / view state ────────────────────────────────────────────────
+  const [terminalLines, setTerminalLines] = useState<string[]>([]);
+  const [showTerminal, setShowTerminal] = useState(false);
+
   useEffect(() => { localStorage.setItem('simType', simType); }, [simType]);
 
   // ── Ticker: smooth countdown every 200ms ─────────────────────────────────
@@ -385,6 +554,7 @@ export default function SimulationDashboard({ isServerReady = true }: { isServer
       checks: {},
     };
     setRunningJobs(prev => [...prev, newJob]);
+    setTerminalLines([]);  // clear terminal output for the new job
     // 2. Open WebSocket for progress updates (best-effort — don't block the HTTP call)
     const ws = new WebSocket(`${WS_URL}/${jobId}`);
     wsRefs.current.set(jobId, ws);
@@ -396,6 +566,13 @@ export default function SimulationDashboard({ isServerReady = true }: { isServer
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+
+      // Raw terminal output — handled separately from job state
+      if (data.type === 'stdout') {
+        setTerminalLines(prev => [...prev, data.line as string].slice(-1000));
+        return;
+      }
+
       setRunningJobs(prev => prev.map(job => {
         if (job.id !== jobId) return job;
         
@@ -607,6 +784,7 @@ export default function SimulationDashboard({ isServerReady = true }: { isServer
 
 
   return (
+    <>
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
 
       {/* ── Left: Parameters ── */}
@@ -834,6 +1012,48 @@ export default function SimulationDashboard({ isServerReady = true }: { isServer
       {/* ── Right: Analytics + Results ── */}
       <div className="lg:col-span-8 space-y-4">
 
+        {/* ── View toggle ── */}
+        <div className="flex items-center justify-end gap-3">
+          <button
+            onClick={() => setShowTerminal(false)}
+            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors duration-150 ${!showTerminal ? 'text-white' : 'text-slate-500 hover:text-slate-400'}`}
+          >
+            <TableProperties className="w-3 h-3" />
+            Results
+          </button>
+
+          <button
+            onClick={() => setShowTerminal(t => !t)}
+            aria-label="Toggle terminal view"
+            className="relative w-11 h-[22px] rounded-full border border-slate-700/60 bg-slate-900 focus:outline-none"
+          >
+            <motion.div
+              animate={{ x: showTerminal ? 22 : 2 }}
+              transition={{ type: 'spring', stiffness: 500, damping: 32 }}
+              className={`absolute top-[3px] w-4 h-4 rounded-full shadow-md transition-colors duration-200 ${
+                showTerminal
+                  ? 'bg-gradient-to-tr from-emerald-500 to-cyan-400'
+                  : 'bg-gradient-to-tr from-indigo-500 to-purple-500'
+              }`}
+            />
+          </button>
+
+          <button
+            onClick={() => setShowTerminal(true)}
+            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors duration-150 ${showTerminal ? 'text-white' : 'text-slate-500 hover:text-slate-400'}`}
+          >
+            <Terminal className="w-3 h-3" />
+            Terminal
+            {runningJobs.length > 0 && (
+              <span className="relative flex h-1.5 w-1.5 ml-0.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+              </span>
+            )}
+          </button>
+        </div>
+
+        {!showTerminal ? (<>
         {/* Results Table */}
         <div className="bg-[#0e0f1e]/60 border border-slate-800/60 rounded-2xl p-4 backdrop-blur-xl shadow-2xl relative overflow-hidden">
           <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
@@ -1044,9 +1264,13 @@ export default function SimulationDashboard({ isServerReady = true }: { isServer
         )}
 
         {/* Run History UI has been removed as requested */}
+        </>) : (
+          <TerminalPanel lines={terminalLines} isLive={runningJobs.length > 0} />
+        )}
 
       </div>
 
     </div>
+    </>
   );
 }
