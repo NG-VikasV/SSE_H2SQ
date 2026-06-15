@@ -1,0 +1,23 @@
+{
+  "include": [
+    "app"
+  ],
+  "exclude": [
+    "src",
+    "venv",
+    ".git",
+    "__pycache__"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "."
+    }
+  ],
+  "extraPaths": [
+    ".",
+    "Analysis/ED_analysis"
+  ],
+  "autoSearchPaths": false,
+  "venvPath": ".",
+  "venv": "venv"
+}

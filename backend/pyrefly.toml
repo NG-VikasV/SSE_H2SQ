@@ -1,0 +1,4 @@
+project-includes = ["app"]
+project-excludes = ["src", "venv"]
+disable-search-path-heuristics = true
+search-path = [".", "Analysis/ED_analysis"]

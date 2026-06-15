@@ -1,0 +1,7 @@
+[tool.pyright]
+extraPaths = ["./backend"]
+exclude = ["./backend/src", "./backend/venv"]
+
+[tool.pyrefly]
+extraPaths = ["./backend"]
+exclude = ["./backend/src", "./backend/venv"]
