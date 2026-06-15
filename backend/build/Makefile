@@ -48,4 +48,15 @@ else
 	@rm -f *.o $(TARGET)
 endif
 
+# ===============================
+# Debug target — enables SSE_DEBUG
+# Recompiles everything from scratch with -DSSE_DEBUG so the diagnostic
+# output (init check, op-string dump, linked list, loop BFS trace) is active.
+# Usage:  make debug     (from backend/build/)
+# ===============================
+.PHONY: debug
+debug:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS="$(CXXFLAGS) -DSSE_DEBUG"
+
 .PHONY: all clean

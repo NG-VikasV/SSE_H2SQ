@@ -320,7 +320,7 @@ async def run_qmc_simulation(params: SimulationParams, client_id: Optional[str])
         try:
             def _run_make():
                 return subprocess.run(
-                    ["make"], cwd=build_dir, capture_output=True, timeout=120
+                    ["make", "debug"], cwd=build_dir, capture_output=True, timeout=120
                 )
             result = await loop.run_in_executor(None, _run_make)
             if result.returncode != 0:

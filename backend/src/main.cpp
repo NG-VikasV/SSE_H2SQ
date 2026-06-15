@@ -16,6 +16,7 @@
 #include "../include/observables.hpp"   // Observables (exact fields only)
 #include "../include/writeresults.hpp"  // ResultWriter
 #include "../include/read_input.hpp"    // read_parameters
+#include "../include/sse_debug.hpp"     // no-op unless SSE_DEBUG is defined
 
 // ======================================================
 // Main
@@ -74,6 +75,11 @@ int main(int argc, char* argv[])
 
 
     std::cout << "[SSE-CHECK] OK | Initialization complete" << std::endl;
+
+#ifdef SSE_DEBUG
+    dbg_check_init(cfg, prm, geom);
+#endif
+
     auto last_update = std::chrono::steady_clock::now();
     auto phase_start = std::chrono::steady_clock::now();
     

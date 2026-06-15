@@ -270,15 +270,27 @@ const AlgorithmChecksPanel = ({ summary }: { summary: Record<string, any> }) => 
   );
 };
 
-// ─── Terminal line colour coding ─────────────────────────────────────────────
+// ─── ANSI strip + terminal colour coding ─────────────────────────────────────
+// Strip ANSI escape sequences (added by C++ debug output) before display.
+// The web terminal doesn't interpret them natively, so we strip and let the
+// prefix-based CSS colouring below provide the visual hierarchy.
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+
 const termLineClass = (line: string): string => {
   if (!line.trim()) return 'text-transparent select-none';
-  if (line.startsWith('[PROGRESS]'))         return 'text-slate-600';
-  if (line.includes('[SSE-CHECK] PASS'))     return 'text-emerald-400';
-  if (line.includes('[SSE-CHECK] FAIL'))     return 'text-red-400';
+  // Debug sections — matched BEFORE the generic '[' check below
+  if (line.startsWith('[DBG-INIT]')) return 'text-blue-400';
+  if (line.startsWith('[DBG-OPS]'))  return 'text-emerald-400';
+  if (line.startsWith('[DBG-LIST]')) return 'text-violet-400';
+  if (line.startsWith('[DBG-LOOP]')) return 'text-rose-400';
+  if (line.startsWith('[DBG-WARN]')) return 'text-amber-400';
+  // Standard SSE output
+  if (line.startsWith('[PROGRESS]'))           return 'text-slate-600';
+  if (line.includes('[SSE-CHECK] PASS'))       return 'text-emerald-400';
+  if (line.includes('[SSE-CHECK] FAIL'))       return 'text-red-400';
   if (line.startsWith('[SSE-CHECKS-SUMMARY]')) return 'text-cyan-300';
-  if (line.startsWith('['))                  return 'text-amber-300';
-  if (line.startsWith('#'))                  return 'text-slate-500';
+  if (line.startsWith('['))                    return 'text-amber-300';
+  if (line.startsWith('#'))                    return 'text-slate-500';
   return 'text-slate-300';
 };
 
@@ -363,11 +375,11 @@ const TerminalPanel = ({ lines, isLive }: { lines: string[]; isLive: boolean }) 
           </div>
         ) : (
           lines.map((line, i) => (
-            <div key={i} className={`flex items-baseline text-[10px] leading-[1.65] ${termLineClass(line)}`}>
+            <div key={i} className={`flex items-baseline text-[10px] leading-[1.65] ${termLineClass(stripAnsi(line))}`}>
               <span className="text-slate-800 mr-3 select-none tabular-nums w-7 text-right flex-shrink-0 font-mono">
                 {i + 1}
               </span>
-              <span className="break-all whitespace-pre-wrap">{line || ' '}</span>
+              <span className="break-all whitespace-pre-wrap">{stripAnsi(line) || ' '}</span>
             </div>
           ))
         )}

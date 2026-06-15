@@ -1,5 +1,6 @@
 #include "../include/updates.hpp"
 #include "../include/variables.hpp"
+#include "../include/sse_debug.hpp"  // no-op unless SSE_DEBUG is defined
 
 #include <algorithm>
 #include <cassert>
@@ -13,6 +14,10 @@
 void SSEUpdates::sweep(SSEConfig &cfg, const Parameters &prm,
                        const Geometry &geom, RNG &rng) {
   diagonal_update(cfg, prm, geom, rng);
+
+#ifdef SSE_DEBUG
+  dbg_print_op_string(cfg, prm, geom);
+#endif
 
   for (int i = 0; i < 2; ++i)
       directed_loop_update(cfg, prm, geom, rng);
@@ -159,6 +164,17 @@ void SSEUpdates::directed_loop_update(SSEConfig &cfg, const Parameters &prm,
   check_integrity();
 #endif
 
+#ifdef SSE_DEBUG
+  static int dbg_pass = 0;
+  ++dbg_pass;
+  dbg_loop_pass_hdr(dbg_pass, n_legs);
+  dbg_print_vertex_list(
+      vertex_op_index, linked_leg, vertex_partner, vertex_spin,
+      leg_site, vertex_base_vec, vertex_decomp,
+      cfg.op_string, first_leg, last_leg,
+      n_legs, (int)cfg.spins.spin.size(), dbg_pass);
+#endif
+
   // --- 1. Identify clusters via BFS (member scratch — no per-call allocation)
   // ---
   m_cluster_id.assign(n_legs, -1);
@@ -166,12 +182,24 @@ void SSEUpdates::directed_loop_update(SSEConfig &cfg, const Parameters &prm,
   m_cluster_flipped.reserve(n_legs);
   int n_clusters = 0;
 
+#ifdef SSE_DEBUG
+  int dbg_n_spin_changes = 0;
+#endif
+
   for (int i = 0; i < n_legs; ++i) {
     if (m_cluster_id[i] != -1)
       continue;
 
     const int cid = n_clusters++;
+
+#ifdef SSE_DEBUG
+    const double dbg_r = rng.uniform();
+    const bool do_flip = (dbg_r < 0.5);
+    dbg_loop_cluster_start(cid, i, dbg_r, do_flip, leg_site);
+#else
     const bool do_flip = (rng.uniform() < 0.5);
+#endif
+
     m_cluster_flipped.push_back(do_flip);
 
     m_cluster_id[i] = cid;
@@ -185,18 +213,36 @@ void SSEUpdates::directed_loop_update(SSEConfig &cfg, const Parameters &prm,
       if (v1 != -1 && m_cluster_id[v1] == -1) {
         m_cluster_id[v1] = cid;
         m_bfs_queue.push_back(v1);
+#ifdef SSE_DEBUG
+        dbg_loop_bfs_expand(u, v1, "linked ", leg_site);
+#endif
       }
       const int v2 = vertex_partner[u];
       if (v2 != -1 && m_cluster_id[v2] == -1) {
         m_cluster_id[v2] = cid;
         m_bfs_queue.push_back(v2);
+#ifdef SSE_DEBUG
+        dbg_loop_bfs_expand(u, v2, "partner", leg_site);
+#endif
       }
     }
+
+#ifdef SSE_DEBUG
+    dbg_loop_cluster_end(cid, (int)m_bfs_queue.size());
+#endif
   }
 
   // --- 2. Update t=0 boundary spins ---
   const int N = static_cast<int>(cfg.spins.spin.size());
+
+#ifdef SSE_DEBUG
+  dbg_loop_spin_section();
+#endif
+
   for (int s = 0; s < N; ++s) {
+#ifdef SSE_DEBUG
+    int dbg_old = cfg.spins.spin[s];
+#endif
     if (first_leg[s] != -1) {
       if (m_cluster_flipped[m_cluster_id[first_leg[s]]])
         cfg.spins.spin[s] *= -1;
@@ -204,11 +250,19 @@ void SSEUpdates::directed_loop_update(SSEConfig &cfg, const Parameters &prm,
       if (rng.uniform() < 0.5)
         cfg.spins.spin[s] *= -1;
     }
+#ifdef SSE_DEBUG
+    if (dbg_old != cfg.spins.spin[s]) ++dbg_n_spin_changes;
+    dbg_loop_spin_update(s, dbg_old, cfg.spins.spin[s]);
+#endif
   }
 
   // --- 3. Toggle TransverseX operators that straddle a cluster boundary ---
   // vertex_base_vec[vp] pre-computed in build_vertex_list: no base-tracking
   // needed here.
+#ifdef SSE_DEBUG
+  bool dbg_had_toggle = false;
+#endif
+
   for (int vp = 0; vp < static_cast<int>(vertex_op_index.size()); ++vp) {
     const int p = vertex_op_index[vp];
     auto &op = cfg.op_string[p];
@@ -222,6 +276,12 @@ void SSEUpdates::directed_loop_update(SSEConfig &cfg, const Parameters &prm,
     const bool flip_out = m_cluster_flipped[m_cluster_id[base + 1]];
 
     if (flip_in != flip_out) {
+#ifdef SSE_DEBUG
+      if (!dbg_had_toggle) { dbg_loop_toggle_section(); dbg_had_toggle = true; }
+      const char* from_s = (op.subtype == OpSubtype::TransverseX_diag) ? "hx_diag " : "hx_offD ";
+      const char* to_s   = (op.subtype == OpSubtype::TransverseX_diag) ? "hx_offD " : "hx_diag ";
+      dbg_loop_op_toggle(p, op.index, from_s, to_s);
+#endif
       if (op.subtype == OpSubtype::TransverseX_diag) {
         op.subtype = OpSubtype::TransverseX_offdiag;
         op.type = OpType::OffDiagonal;
@@ -231,6 +291,14 @@ void SSEUpdates::directed_loop_update(SSEConfig &cfg, const Parameters &prm,
       }
     }
   }
+
+#ifdef SSE_DEBUG
+  {
+    int dbg_n_flipped = 0;
+    for (bool f : m_cluster_flipped) if (f) ++dbg_n_flipped;
+    dbg_loop_footer(n_clusters, dbg_n_flipped, dbg_n_spin_changes);
+  }
+#endif
 
 #ifndef NDEBUG
   check_spin_consistency(cfg, geom);
@@ -341,7 +409,11 @@ void SSEUpdates::build_vertex_list(SSEConfig &cfg, const Geometry &geom,
         const int in_leg = base;
         const int out_leg = base + 1;
 
-        vertex_spin[in_leg] = spin[site];
+        vertex_spin[in_leg]  = spin[site];
+        // Out-leg: spin flips for off-diagonal; propagate through imaginary time
+        vertex_spin[out_leg] = (op.subtype == OpSubtype::TransverseX_offdiag)
+                               ? -spin[site] : spin[site];
+        if (op.subtype == OpSubtype::TransverseX_offdiag) spin[site] *= -1;
 
         leg_site[in_leg] = site;
         leg_site[out_leg] = site;
@@ -365,6 +437,10 @@ void SSEUpdates::build_vertex_list(SSEConfig &cfg, const Geometry &geom,
           const int site = sites_buf[i];
           const int l_in = base + 2 * i;
           const int l_out = l_in + 1;
+
+          // Populate vertex_spin for all diagonal-op legs (in == out for diagonal)
+          vertex_spin[l_in]  = spin[site];
+          vertex_spin[l_out] = spin[site];
 
           leg_site[l_in] = site;
           leg_site[l_out] = site;
