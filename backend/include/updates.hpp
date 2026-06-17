@@ -2,7 +2,6 @@
 #define SSE_UPDATES_HPP
 
 #include <vector>
-#include <stack>
 #include "variables.hpp"
 
 // ======================================================
@@ -29,20 +28,37 @@ public:
     void check_spin_consistency(const SSEConfig& cfg,
                                 const Geometry& geom);
 
-
-
-
     // Diagonal insertion / removal
     void diagonal_update(SSEConfig& cfg,
                          const Parameters& prm,
                          const Geometry& geom,
-                         RNG& rng);                     
+                         RNG& rng);
 
-    // Directed-loop (quantum cluster) update
-    void directed_loop_update(SSEConfig& cfg,
-                              const Parameters& prm,
-                              const Geometry& geom,
-                              RNG& rng);
+    // Quantum loop-cluster update (Melko-style SSE BFS cluster algorithm).
+    //
+    // For each non-identity operator vertex in the SSE string, internal
+    // "partner" links encode which pairs of legs must flip together to
+    // preserve that vertex's weight:
+    //
+    //   J0 plaquette  : randomly decomposes σ1σ2σ3σ4 into two 2-body
+    //                   bonds chosen from the three pairings
+    //                   {(0,1)&(2,3)}, {(0,2)&(1,3)}, {(0,3)&(1,2)}.
+    //                   Each pair forms an independent bond in the cluster
+    //                   graph — the two bonds CAN end up in different
+    //                   clusters.
+    //   J1 plaquette  : fixed pairing (0,2) & (1,3), consistent with the
+    //                   J1 = σ0σ2 + σ1σ3 structure.
+    //   J2 / J3 bond  : both sites in the pair are bonded (flip together).
+    //   hx (transv.)  : no internal bond; instead, when a cluster boundary
+    //                   straddles an hx vertex the operator toggles between
+    //                   hx_diag ↔ hx_offdiag to maintain spin consistency.
+    //
+    // BFS identifies connected components; each cluster is flipped with
+    // probability 1/2.
+    void loop_cluster_update(SSEConfig& cfg,
+                             const Parameters& prm,
+                             const Geometry& geom,
+                             RNG& rng);
 
     // --------------------------------------------------
     // Optional: Self-learning Monte Carlo (global move)
@@ -53,8 +69,7 @@ public:
                      RNG& rng);
 
     // Gauge-sector update: flip entire rows / columns to restore ergodicity.
-    // For J0-only model, flipping a full row (or column) touches exactly 2 sites
-    // on every plaquette that straddles that row -> prod unchanged -> always valid.
+    // Only active for J0-only model (J1=J2=J3=hx=0).
     void gauge_update(SSEConfig& cfg,
                       const Parameters& prm,
                       const Geometry& geom,
@@ -62,60 +77,20 @@ public:
 
 private:
     // ==================================================
-    // Internal helpers (hot path)
+    // Internal helpers
     // ==================================================
 
-    // Number of legs per vertex
-    static constexpr int legs_per_vertex = 4;
-
-    // --------------------------------------------------
-    // Vertex / leg bookkeeping
-    // --------------------------------------------------
-
-
-
+    // Build SSE imaginary-time vertex list and partner/time links
     void build_vertex_list(SSEConfig& cfg,
-                        const Geometry& geom,
-                        RNG& rng);
-
+                           const Geometry& geom,
+                           RNG& rng);
 
     void check_integrity();
 
-
-
-
-    // Choose exit leg (directed-loop probabilities)
-    // Choose exit leg (directed-loop probabilities)
-    int choose_exit_leg(int vertex,
-                        int entry_leg,
-                        int spin_out,
-                        const SSEConfig& cfg,
-                        const Parameters& prm,
-                        const Geometry& geom,
-                        RNG& rng);
-
-                        
-
-    // Propagate changes back to |α⟩
+    // Propagate t=0 boundary spins from vertex_spin after cluster update
     void propagate_spins(SSEConfig& cfg);
 
-
-    // Flip a single vertex leg (global leg index)
-    inline void flip_leg(int global_leg, int new_spin);
-        
-    // --------------------------------------------------
-    // Directed-loop propagation
-    // --------------------------------------------------
-    void propagate_loop(SSEConfig& cfg,
-                        const Parameters& prm,
-                        const Geometry& geom,
-                        RNG& rng,
-                        int start_leg);
-
-
-    // --------------------------------------------------
     // Diagonal operator weights
-    // --------------------------------------------------
     double diagonal_weight(int subtype,
                            int index,
                            const SSEConfig& cfg,
@@ -123,71 +98,36 @@ private:
                            const Geometry& geom);
 
     // ==================================================
-    // Internal storage (reused every sweep)
+    // Internal storage (reused every sweep — no per-sweep allocation)
     // ==================================================
 
-    // List of non-identity operators as vertices
-    std::vector<int> vertex_op_index;
-
-    // Decomposition choice for each vertex (J0, J1 support)
-    std::vector<int> vertex_decomp;
-
-    // Linked list of legs (size = n_legs)
-    std::vector<int> linked_leg;
-
+    std::vector<int> vertex_op_index;       // indices of non-identity ops
+    std::vector<int> vertex_decomp;         // J0 pair decomposition type per op
+    std::vector<int> linked_leg;            // imaginary-time links between legs
     std::vector<int> linked_leg_to_op_index;
-
-    // Partner leg within the vertex (Space Link)
-    std::vector<int> vertex_partner;
-
-    // Spin value on each leg
-    std::vector<int> vertex_spin;
-
-    std::vector<int> leg_site;  
-    
+    std::vector<int> vertex_partner;        // within-vertex pair-bond links
+    std::vector<int> vertex_spin;           // spin value on each leg
+    std::vector<int> leg_site;
     std::vector<int> base_vertex_leg;
-    
-    // cluster bookkeeping
-    std::vector<int> cluster_state; 
-    //  >=0 : unvisited
-    //  -1  : visited (not flipped)
-    //  -2  : flipped
-
-    std::stack<int> stack;
-
-
-    // imaginary-time boundaries
-    std::vector<int> first_leg;          // per site
-    std::vector<int> last_leg;           // per site
-
-
+    std::vector<int> first_leg;             // per site: first leg in imaginary time
+    std::vector<int> last_leg;              // per site: last leg in imaginary time
 
     int n_legs = 0;
 
-    // --------------------------------------------------
-    // Cached active subtypes — rebuilt each sweep, member avoids per-call allocation
-    // --------------------------------------------------
-    std::vector<OpSubtype> m_active_subtypes;
-    std::vector<int>       m_n_diags;
-    int                    m_N_active = 0;
-    int                    m_n_diag_by_sub[6] = {}; // indexed by int(OpSubtype)
-
-    // --------------------------------------------------
-    // BFS scratch for directed_loop_update — member avoids per-call allocation
-    // --------------------------------------------------
+    // BFS scratch (member to avoid per-call allocation)
     std::vector<int>  m_cluster_id;
     std::vector<bool> m_cluster_flipped;
     std::vector<int>  m_bfs_queue;
 
-    // --------------------------------------------------
-    // Per-vertex base leg index (parallel to vertex_op_index, filled by build_vertex_list)
-    // Eliminates current_base re-derivation in directed_loop_update
-    // --------------------------------------------------
+    // Per-vertex base leg index (parallel to vertex_op_index)
     std::vector<int> vertex_base_vec;
 
-    // --------------------------------------------------
-    // SLMC toggle
-    // --------------------------------------------------
+    // Cached active subtypes — rebuilt each sweep
+    std::vector<OpSubtype> m_active_subtypes;
+    std::vector<int>       m_n_diags;
+    int                    m_N_active = 0;
+    int                    m_n_diag_by_sub[6] = {};
+
     bool use_slmc = false;
 };
 

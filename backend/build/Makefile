@@ -5,6 +5,7 @@ CXX := g++
 CXXFLAGS := -O3 -std=c++17 -Wall -pedantic-errors -g \
             -msse2 -march=native -funroll-loops -ffast-math \
             -fomit-frame-pointer -fstrict-aliasing
+LDFLAGS := -static-libgcc -static-libstdc++ -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive,-Bdynamic
 
 # ===============================
 # Source directory (unchanged)
@@ -29,7 +30,7 @@ all: $(TARGET)
 # Link
 # ===============================
 $(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
 
 # ===============================
 # Compile EACH source separately
@@ -58,5 +59,15 @@ endif
 debug:
 	$(MAKE) clean
 	$(MAKE) CXXFLAGS="$(CXXFLAGS) -DSSE_DEBUG"
+
+# ===============================
+# Verbose target — enables VERBOSE print output
+# Recompiles with -DVERBOSE so parameter dumps and [SSE-CHECK] lines are shown.
+# Usage:  make verbose   (from backend/build/)
+# ===============================
+.PHONY: verbose
+verbose:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS="$(CXXFLAGS) -DVERBOSE"
 
 .PHONY: all clean

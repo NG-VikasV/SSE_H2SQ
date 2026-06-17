@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Play, Square, Sparkles, TableProperties, Grid3x3, Terminal } from 'lucide-react';
+import { Play, Square, Sparkles, TableProperties, Grid3x3, Terminal, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const hostname = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1';
@@ -297,6 +297,14 @@ const termLineClass = (line: string): string => {
 const TerminalPanel = ({ lines, isLive }: { lines: string[]; isLive: boolean }) => {
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = React.useState(true);
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(lines.join('\n')).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   React.useEffect(() => {
     if (autoScroll && scrollRef.current)
@@ -347,11 +355,25 @@ const TerminalPanel = ({ lines, isLive }: { lines: string[]; isLive: boolean }) 
           </button>
           {lines.length > 0 && (
             <button
-              onClick={() => navigator.clipboard?.writeText(lines.join('\n'))}
+              onClick={handleCopy}
               title="Copy all output"
-              className="text-[8px] font-bold px-1.5 py-0.5 rounded border text-slate-500 border-slate-700/30 bg-slate-900/30 hover:text-slate-300 transition-colors"
+              className={`flex items-center gap-1 text-[8px] font-bold px-1.5 py-0.5 rounded border transition-all duration-200 ${
+                copied
+                  ? 'text-emerald-400 border-emerald-500/40 bg-emerald-950/30'
+                  : 'text-slate-500 border-slate-700/30 bg-slate-900/30 hover:text-slate-300'
+              }`}
             >
-              COPY
+              {copied ? (
+                <>
+                  <Check className="w-2.5 h-2.5" />
+                  COPIED
+                </>
+              ) : (
+                <>
+                  <Copy className="w-2.5 h-2.5" />
+                  COPY
+                </>
+              )}
             </button>
           )}
         </div>

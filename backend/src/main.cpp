@@ -28,23 +28,29 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
+#ifdef VERBOSE
     using clock = std::chrono::high_resolution_clock;
     auto t_start = clock::now();
+#endif
 
     // --------------------------------------------------
     // Read parameters
     // --------------------------------------------------
     Parameters prm;
     read_parameters(argv[1], prm);
+#ifdef VERBOSE
     prm.print_parameters();
-    
+#endif
+
     // --------------------------------------------------
     // Geometry
     // --------------------------------------------------
     Geometry geom;
     geom.build(prm.Lx, prm.Ly, prm.Lz);
+#ifdef VERBOSE
     geom.print_black_plaquettes();
     geom.print_j2_bonds();
+#endif
 
 
     // --------------------------------------------------
@@ -74,7 +80,9 @@ int main(int argc, char* argv[])
     // cfg.spins.spin.resize(prm.Ns, -1);   // cold start
 
 
+#ifdef VERBOSE
     std::cout << "[SSE-CHECK] OK | Initialization complete" << std::endl;
+#endif
 
 #ifdef SSE_DEBUG
     dbg_check_init(cfg, prm, geom);
@@ -149,7 +157,9 @@ int main(int argc, char* argv[])
         updates.adjust_operator_string(cfg);
         emit_progress("therm", step + 1, prm.n_therm);
     }
+#ifdef VERBOSE
     std::cout << "[SSE-CHECK] OK | Equilibration finished" << std::endl;
+#endif
 
     // --------------------------------------------------
     // Measurements
@@ -181,7 +191,9 @@ int main(int argc, char* argv[])
     spin_file << "\n]\n";
     spin_file.close();
 
+#ifdef VERBOSE
     std::cout << "[SSE-CHECK] OK | Measurement finished" << std::endl;
+#endif
 
     obs.normalize();   // normalize using n_samples inside obs
 
@@ -224,16 +236,14 @@ int main(int argc, char* argv[])
 
     writer.write_row(headers, values);
 
-    // --------------------------------------------------
-    // Timing
-    // --------------------------------------------------
+#ifdef VERBOSE
     auto t_end = clock::now();
     double elapsed =
         std::chrono::duration<double>(t_end - t_start).count();
-
     std::cout << "SSE simulation finished in "
               << std::fixed << std::setprecision(3)
               << elapsed << " seconds\n";
+#endif
 
     return 0;
 }

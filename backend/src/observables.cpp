@@ -119,11 +119,16 @@ void Observables::accumulate(const SSEConfig& cfg,
     mx4 += mx_inst * mx_inst * mx_inst * mx_inst;
 
     // --------------------------------------------------
-    // Longitudinal magnetization
+    // Longitudinal magnetization (Staggered)
     // --------------------------------------------------
     double mz_inst = 0.0;
-    for (int s : cfg.spins.spin)
-        mz_inst += s;
+    for (int i = 0; i < prm.Ns; ++i) {
+        int ix = i % prm.Lx;
+        int iy = (i / prm.Lx) % prm.Ly;
+        int iz = i / (prm.Lx * prm.Ly);
+        int phase = ((ix + iy + iz) % 2 == 0) ? 1 : -1;
+        mz_inst += 0.5 * cfg.spins.spin[i] * phase;
+    }
 
     mz_inst /= double(prm.Ns);
 

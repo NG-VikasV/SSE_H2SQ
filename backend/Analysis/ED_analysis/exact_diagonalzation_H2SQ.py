@@ -288,7 +288,8 @@ def action(ii, J0, J1, J2, h, bplaq, bplaq_nbh1, bplaq_nbh2):
     # Heisenberg AFM only model
     # diagonal
     de  = - J0 * (ii[i] * ii[k] * ii[j] * ii[l])
-    de +=   J1 * (ii[i] * ii[l] + ii[j] * ii[k])
+    # QMC physical energy for J1 corresponds to bonds (i,k) and (j,l) and includes a 4-spin term:
+    de +=   abs(J1) * (1.0 - ii[i]*ii[k] - ii[j]*ii[l] - ii[i]*ii[k]*ii[j]*ii[l])
     de +=   J2 * (ii[i1] + ii[k1] - ii[j1] - ii[l1]) / 4.0 * (ii[i] + ii[k] - ii[j] - ii[l]) / 4.0
     de +=   J2 * (ii[i1] + ii[j1] - ii[k1] - ii[l1]) / 4.0 * (ii[i] + ii[j] - ii[k] - ii[l]) / 4.0
     de +=   J2 * (ii[i2] + ii[k2] - ii[j2] - ii[l2]) / 4.0 * (ii[i] + ii[k] - ii[j] - ii[l]) / 4.0
@@ -302,7 +303,7 @@ def action(ii, J0, J1, J2, h, bplaq, bplaq_nbh1, bplaq_nbh2):
         jj = list(ii)
         jj[s] = -ii[s] # flip site i
         jj = tuple(jj)
-        coef_list.append(0.5 * h / 2.)     # / 2. is accounted for double counting
+        coef_list.append(-0.5 * h)     # -0.5 * h because each site is in 2 black plaquettes
         state_list.append(jj)
 
     return state_list, coef_list   

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <iterator>
 
@@ -20,7 +21,7 @@ void SSEUpdates::sweep(SSEConfig &cfg, const Parameters &prm,
 #endif
 
   for (int i = 0; i < 2; ++i)
-      directed_loop_update(cfg, prm, geom, rng);
+      loop_cluster_update(cfg, prm, geom, rng);
 
   // Gauge-sector update restores ergodicity: the BFS cluster collapses all
   // sites into one giant cluster (they're connected through shared plaquette
@@ -155,9 +156,9 @@ double SSEUpdates::diagonal_weight(int subtype, int index, const SSEConfig &cfg,
 }
 
 // ======================================================
-// 2. Directed Loop update (cluster variant)
+// 2. Quantum loop-cluster update (Melko-style BFS cluster algorithm)
 // ======================================================
-void SSEUpdates::directed_loop_update(SSEConfig &cfg, const Parameters &prm,
+void SSEUpdates::loop_cluster_update(SSEConfig &cfg, const Parameters &/*prm*/,
                                       const Geometry &geom, RNG &rng) {
   build_vertex_list(cfg, geom, rng);
 #ifndef NDEBUG
@@ -460,62 +461,49 @@ void SSEUpdates::build_vertex_list(SSEConfig &cfg, const Geometry &geom,
           last_leg[site] = l_out;
         }
 
-        // Internal vertex partner links (force paired-site cluster flips)
+        // Internal vertex partner links (4-cycle per pair).
+        //
+        // For each paired pair of sites (A, B) in a diagonal vertex, the
+        // 4 legs {in_A, in_B, out_B, out_A} form a directed cycle:
+        //   in_A → in_B → out_B → out_A → in_A
+        //
+        // This forces all 4 legs into the same BFS cluster, which guarantees:
+        //  (a) Both sites A and B are always flipped together (preserves the
+        //      diagonal coupling σ_A σ_B).
+        //  (b) Same-site in_A and out_A are always co-clustered, so the
+        //      imaginary-time chain for hx operators passing through this
+        //      vertex is never "split" — critical for hx parity correctness.
+        //
+        // vertex_partner stores a single "next-in-cycle" pointer per leg.
+        // BFS follows all partner edges transitively, so the full 4-leg set
+        // is visited in one connected component regardless of entry point.
+        auto set_pair_cycle = [&](int liA, int liB) {
+          // 4-cycle: liA(in_A) → liB(in_B) → liB+1(out_B) → liA+1(out_A) → liA
+          vertex_partner[liA]     = liB;
+          vertex_partner[liB]     = liB + 1;
+          vertex_partner[liB + 1] = liA + 1;
+          vertex_partner[liA + 1] = liA;
+        };
+
         if (op.subtype == OpSubtype::J0_Plaquette) {
           const int type = vertex_decomp[p];
           int p1A, p1B, p2A, p2B;
           if (type == 0) {
-            p1A = 0;
-            p1B = 1;
-            p2A = 2;
-            p2B = 3;
+            p1A = 0; p1B = 1; p2A = 2; p2B = 3;
           } else if (type == 1) {
-            p1A = 0;
-            p1B = 2;
-            p2A = 1;
-            p2B = 3;
+            p1A = 0; p1B = 2; p2A = 1; p2B = 3;
           } else {
-            p1A = 0;
-            p1B = 3;
-            p2A = 1;
-            p2B = 2;
+            p1A = 0; p1B = 3; p2A = 1; p2B = 2;
           }
-          {
-            int liA = base + 2 * p1A, liB = base + 2 * p1B;
-            vertex_partner[liA] = liB;
-            vertex_partner[liB] = liA;
-            vertex_partner[liA + 1] = liB + 1;
-            vertex_partner[liB + 1] = liA + 1;
-          }
-          {
-            int liA = base + 2 * p2A, liB = base + 2 * p2B;
-            vertex_partner[liA] = liB;
-            vertex_partner[liB] = liA;
-            vertex_partner[liA + 1] = liB + 1;
-            vertex_partner[liB + 1] = liA + 1;
-          }
+          set_pair_cycle(base + 2 * p1A, base + 2 * p1B);
+          set_pair_cycle(base + 2 * p2A, base + 2 * p2B);
         } else if (op.subtype == OpSubtype::J1_Plaquette) {
-          // Deterministic diagonal pairing: sites (0,2) and (1,3)
-          {
-            int liA = base + 0, liB = base + 4; // 2*0, 2*2
-            vertex_partner[liA] = liB;
-            vertex_partner[liB] = liA;
-            vertex_partner[liA + 1] = liB + 1;
-            vertex_partner[liB + 1] = liA + 1;
-          }
-          {
-            int liA = base + 2, liB = base + 6; // 2*1, 2*3
-            vertex_partner[liA] = liB;
-            vertex_partner[liB] = liA;
-            vertex_partner[liA + 1] = liB + 1;
-            vertex_partner[liB + 1] = liA + 1;
-          }
+          // Fixed pairing: sites (0,2) and (1,3)
+          set_pair_cycle(base + 0, base + 4); // 2*0, 2*2
+          set_pair_cycle(base + 2, base + 6); // 2*1, 2*3
         } else {
           // J2/J3: two-site bond — pair sites 0 and 1
-          vertex_partner[base + 0] = base + 2;
-          vertex_partner[base + 2] = base + 0;
-          vertex_partner[base + 1] = base + 3;
-          vertex_partner[base + 3] = base + 1;
+          set_pair_cycle(base + 0, base + 2);
         }
       }
     }
@@ -629,10 +617,12 @@ void SSEUpdates::slmc_update(SSEConfig &cfg, const Parameters & /*prm*/,
 // This restores ergodicity that the BFS cluster update loses: at large β the
 // cluster collapses to one giant cluster, allowing only the global Z2 flip.
 void SSEUpdates::gauge_update(SSEConfig &cfg, const Parameters &prm,
-                              const Geometry &geom, RNG &rng) {
-  // Only valid when J0 is the only interaction (J2/J3/hx add bonds that
-  // cross rows/columns and would change weight on a single-site flip).
-  if (prm.J2 != 0.0 || prm.J3 != 0.0 || prm.hx != 0.0)
+                              const Geometry &/*geom*/, RNG &rng) {
+  // Only valid when J0 is the only interaction. J1 plaquette weights use
+  // diagonal spin products s[0]*s[2] + s[1]*s[3]: flipping a full row negates
+  // both products (sign flip), so row flips invalidate J1 weights. J2/J3/hx
+  // add bonds that cross rows/columns and are similarly broken by row/col flips.
+  if (prm.J1 != 0.0 || prm.J2 != 0.0 || prm.J3 != 0.0 || prm.hx != 0.0)
     return;
 
   const int Lx = prm.Lx;
@@ -655,93 +645,3 @@ void SSEUpdates::gauge_update(SSEConfig &cfg, const Parameters &prm,
   }
 }
 
-// ======================================================
-// Choose exit leg for Directed Loop
-// ======================================================
-int SSEUpdates::choose_exit_leg(int vertex, int entry_leg, int spin_out,
-                                const SSEConfig &cfg, const Parameters &prm,
-                                const Geometry &geom, RNG &rng) {
-  (void)spin_out;
-
-  const auto &op = cfg.op_string[vertex];
-
-  if (op.subtype == OpSubtype::TransverseX_diag ||
-      op.subtype == OpSubtype::TransverseX_offdiag) {
-    return (rng.uniform() < 0.5) ? (entry_leg ^ 1) : entry_leg;
-  }
-
-  const int base = base_vertex_leg[entry_leg];
-  const int rel = entry_leg - base;
-  int partner_site_idx = -1;
-
-  if (op.subtype == OpSubtype::J0_Plaquette) {
-    // Lookup table replaces 12-branch if-else
-    static constexpr int J0_partners[3][4] = {
-        {1, 0, 3, 2}, // type 0: 0<->1, 2<->3
-        {2, 3, 0, 1}, // type 1: 0<->2, 1<->3
-        {3, 2, 1, 0}, // type 2: 0<->3, 1<->2
-    };
-    partner_site_idx = J0_partners[vertex_decomp[vertex]][rel / 2];
-  } else if (op.subtype == OpSubtype::J1_Plaquette) {
-    static constexpr int J1_partners[4] = {2, 3, 0, 1}; // 0<->2, 1<->3
-    const int partner_site = J1_partners[rel / 2];
-    return base + partner_site * 2 + (rel % 2 == 0 ? 1 : 0);
-  } else if (op.subtype == OpSubtype::J2_Dipole ||
-             op.subtype == OpSubtype::J3_Inter) {
-    partner_site_idx = (rel / 2 == 0) ? 1 : 0;
-  }
-
-  if (partner_site_idx == -1)
-    return entry_leg ^ 1;
-
-  // All current Ising-diagonal operators have w_horiz = 0, so evaluate
-  // w_vert and fall through to vertical exit unless weights change.
-  const int p_base = partner_site_idx * 2;
-  const int l0 = base + (rel / 2) * 2;
-  const int l2 = base + p_base;
-  const int l3 = base + p_base + 1;
-
-  double J_val = 0.0, C = 0.0;
-
-  if (op.subtype == OpSubtype::J0_Plaquette) {
-    const int s_idx1 = (rel / 2), s_idx2 = partner_site_idx;
-    int spec1 = -1, spec2 = -1;
-    for (int k = 0; k < 4; ++k) {
-      if (k != s_idx1 && k != s_idx2) {
-        if (spec1 == -1)
-          spec1 = k;
-        else
-          spec2 = k;
-      }
-    }
-    const double sign = static_cast<double>(vertex_spin[base + spec1 * 2] *
-                                            vertex_spin[base + spec2 * 2]);
-    J_val = prm.J0 * sign;
-    C = 2.0 * std::abs(prm.J0);
-  } else if (op.subtype == OpSubtype::J1_Plaquette) {
-    J_val = prm.J1;
-    C = 2.0 * std::abs(prm.J1);
-  } else if (op.subtype == OpSubtype::J2_Dipole) {
-    J_val = geom.j2bonds[op.index].J_val * prm.J2;
-    C = 2.0 * std::abs(prm.J2);
-  } else if (op.subtype == OpSubtype::J3_Inter) {
-    J_val = prm.J3;
-    C = 2.0 * std::abs(prm.J3);
-  }
-
-  double w_vert =
-      C > 0.0 ? C - J_val * (vertex_spin[l0] * vertex_spin[l2])
-              : std::abs(J_val) - J_val * (vertex_spin[l0] * vertex_spin[l2]);
-  if (w_vert < 1e-9)
-    w_vert = 0.0;
-
-  // w_horiz = 0 for all Ising-diagonal operators; horizontal exit is never
-  // chosen. Return the candidate horizontal leg here for completeness if
-  // w_horiz ever becomes non-zero.
-  const int cand_horiz = (rel % 2 == 0) ? l2 : l3;
-  (void)cand_horiz;
-
-  if (w_vert <= 1e-14)
-    return entry_leg ^ 1; // fallback
-  return entry_leg ^ 1;
-}

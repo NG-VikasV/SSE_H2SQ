@@ -230,7 +230,7 @@ async def run_ed_simulation(params: SimulationParams):
 
         # ---- Full Hamiltonian build ----
         Hsp = H2SQ_hamiltonian(spins, params.J0, params.J1, params.J2,
-                               params.hx, bplaqs, neighbor_map)
+                               params.h, bplaqs, neighbor_map)
 
         # ---- Phase 2: estimate diagonalization time via trial matvecs ----
         # Lanczos (eigsh) costs ≈ n_vals * 3 matvecs; each matvec costs the
@@ -315,12 +315,12 @@ async def run_qmc_simulation(params: SimulationParams, client_id: Optional[str])
                 return
             await asyncio.sleep(0.1)
 
-    if True:
-        await _ws_send({"type": "time_estimate", "phase": "compile", "eta": 30.0})
+    if not os.path.exists(exe_path):
+        await _ws_send({"type": "time_estimate", "phase": "compile", "eta": 60.0})
         try:
             def _run_make():
                 return subprocess.run(
-                    ["make", "debug"], cwd=build_dir, capture_output=True, timeout=120
+                    ["make"], cwd=build_dir, capture_output=True, timeout=300
                 )
             result = await loop.run_in_executor(None, _run_make)
             if result.returncode != 0:
@@ -328,8 +328,7 @@ async def run_qmc_simulation(params: SimulationParams, client_id: Optional[str])
                     f"C++ Compilation failed:\n{result.stderr.decode(errors='replace')}"
                 )
         except subprocess.TimeoutExpired:
-            raise RuntimeError("C++ Compilation timed out after 120 seconds")
-        # Signal compile complete
+            raise RuntimeError("C++ Compilation timed out after 300 seconds")
         await _ws_send({"type": "progress", "phase": "compile", "current": 1, "total": 1, "eta": 0.0})
 
     if not os.path.exists(exe_path):
